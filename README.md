@@ -8,7 +8,7 @@ Think of it as a smart filter: instead of passing all memories to your model, Cl
 
 ## Why
 
-OpenClaw's `memory-core` provides search tools (`memory_search`, `memory_get`). ClawText adds automatic context injection:
+OpenClaw's `memory-core` provides search tools (`memory_search`, `memory_get`). ClawText adds automatic context injection and populates from existing data sources:
 
 | Capability | memory-core | + ClawText | Benefit |
 |---|---|---|---|
@@ -17,6 +17,7 @@ OpenClaw's `memory-core` provides search tools (`memory_search`, `memory_get`). 
 | **Automatic Injection** | ❌ Manual | ✅ 5-7ms search | Always available |
 | **Relevance Filtering** | ❌ All results | ✅ 85%+ confidence | Smart filtering |
 | **Token Efficiency** | N/A | ✅ 12% budget | Safe, predictable |
+| **Data Ingestion** | ❌ Manual import | ✅ From files/web/channels | Populate from existing sources |
 
 ## Features
 
@@ -186,7 +187,26 @@ Smaller injection; snippets instead of full text.
 
 ClawText works with any memories stored in OpenClaw's memory format (Markdown files in `~/.openclaw/workspace/memory/`). This enables you to populate context from existing sources:
 
-### From Files
+### Quick Start: Automated Ingestion
+
+For agents installing ClawText, use the companion **clawtext-ingest** skill (available via `npm install @openclaw/clawtext-ingest`):
+
+```javascript
+// Automated multi-source ingestion
+const ingest = require('clawtext-ingest');
+
+await ingest.fromFiles(['docs/**/*.md', 'notes/**/*.txt']);
+await ingest.fromUrls(['https://docs.example.com', 'https://wiki.example.com']);
+await ingest.fromDatasource('discord', {channel: 'decisions', limit: 500});
+
+// All data automatically formatted with YAML headers
+// Clusters rebuilt on next session start
+console.log('✅ Data imported and indexed');
+```
+
+This handles conversion, YAML header generation, deduplication, and cluster management automatically.
+
+### Manual: From Various Sources
 
 ```bash
 # Convert project documentation to memory
