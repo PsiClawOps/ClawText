@@ -12,9 +12,39 @@ metadata:
 
 # ClawSaver
 
-**Reduce model API costs by 20–40% through intelligent message batching.**
+**Reduce model API costs by 20–40% through intelligent message batching and buffering.**
 
 Most agent systems waste money on redundant API calls. When users send follow-up messages, you call the model separately for each one. ClawSaver fixes this by waiting ~800ms to collect related messages, then sending them together in a single optimized request. Same response quality. Lower cost. No user friction.
+
+## How It Works: Batching & Buffering
+
+```
+WITHOUT CLAWSAVER:
+User:  "What is ML?"
+Model: → API Call #1 (cost: $X)
+
+User:  "Give an example"
+Model: → API Call #2 (cost: $X)
+
+User:  "Apply to finance?"
+Model: → API Call #3 (cost: $X)
+Total cost: 3X, three fragmented responses
+
+───────────────────────────────────────
+
+WITH CLAWSAVER (Batching + Buffering):
+User:  "What is ML?"          ← Buffer (800ms wait)
+User:  "Give an example"      ← Buffer (800ms wait)
+User:  "Apply to finance?"    ← Flush: Send all 3 together
+
+Model: → API Call #1 (cost: $X) [receives all 3 questions]
+       → Returns comprehensive answer addressing all three
+
+Total cost: 1X, three coherent insights in one response
+Savings: 67% reduction in API calls
+```
+
+**Key insight:** Users are already waiting for your model to respond. Buffering input doesn't add perceived latency—it happens during the response time they expect anyway.
 
 ## The Problem
 
