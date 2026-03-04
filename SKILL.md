@@ -2,7 +2,7 @@
 
 **Name:** clawtext  
 **Type:** RAG Context Injection Plugin  
-**Version:** 1.0.0  
+**Version:** 1.2.0  
 **Status:** Production  
 **Category:** Memory & Knowledge Management  
 

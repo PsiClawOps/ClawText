@@ -1,6 +1,6 @@
 # ClawText
 
-**Version:** 1.0.0 | **Status:** Production-Ready
+**Version:** 1.2.0 | **Status:** Production-Ready
 
 **Context Layer Augmentation with Text** — Intelligent retrieval-augmented generation (RAG) layer for OpenClaw. Automatically searches your memories and injects relevant context into every prompt before execution.
 
