@@ -18,7 +18,19 @@ const ALLOWED_FORUMS = new Set([
 ]);
 const GUILD_ID = '1474997926919929927';
 
+function ensureCallerGuild(opts) {
+  // Enforce that the caller provides their guild context and it matches the allowed guild
+  if (!opts || !opts.callerGuildId) {
+    throw new Error('Missing callerGuildId in options — operation not permitted');
+  }
+  if (String(opts.callerGuildId) !== GUILD_ID) {
+    throw new Error('Caller not in permitted guild');
+  }
+}
+
 async function refreshThread(sourceThreadId, options = {}) {
+  ensureCallerGuild(options);
+
   const opts = Object.assign({
     messageCount: 150,
     summaryStyle: 'detailed',
@@ -74,6 +86,8 @@ async function refreshThread(sourceThreadId, options = {}) {
 }
 
 async function splitThread(sourceThreadId, newTitle, forumChannelId, options = {}) {
+  ensureCallerGuild(options);
+
   const opts = Object.assign({
     messageCount: 15,
     summaryStyle: 'brief',
@@ -104,6 +118,8 @@ async function splitThread(sourceThreadId, newTitle, forumChannelId, options = {
 }
 
 async function freshThread(forumChannelId, title, seedText, options = {}) {
+  ensureCallerGuild(options);
+
   const opts = Object.assign({
     messageCount: 0,
     postHandoffInSource: false,
