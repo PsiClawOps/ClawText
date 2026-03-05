@@ -1,0 +1,9 @@
+{
+  "name": "thread-bridge",
+  "title": "Thread Bridge",
+  "description": "Create and manage forum thread splits/refreshes in Discord while preserving per-thread agent isolation.",
+  "author": "OpenClaw Subagent",
+  "version": "0.1.0",
+  "license": "MIT",
+  "skills": ["thread-bridge"]
+}

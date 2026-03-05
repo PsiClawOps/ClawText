@@ -1,0 +1,9 @@
+{
+  "name": "thread-bridge",
+  "version": "0.1.0",
+  "description": "OpenClaw skill: thread-bridge",
+  "main": "index.js",
+  "author": "OpenClaw Subagent",
+  "license": "MIT",
+  "dependencies": {}
+}
