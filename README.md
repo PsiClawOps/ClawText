@@ -1,311 +1,310 @@
 # ClawText
 
-**Version:** 1.2.0 | **Status:** Production-Ready
+**Version:** 1.2.0 | **Status:** Production — Active
 
-**Context Layer Augmentation with Text** — Intelligent retrieval-augmented generation (RAG) layer for OpenClaw. Automatically searches your memories and injects relevant context into every prompt before execution.
+**Context-Layer Augmentation with Text** — Automatic retrieval-augmented generation (RAG) for OpenClaw. Searches your memory clusters and injects relevant context into every prompt before your agent sees it.
 
-Think of it as a smart filter: instead of passing all memories to your model, ClawText identifies what matters and injects only that context.
+---
 
-## Why
+## What It Does
 
-OpenClaw's `memory-core` provides search tools (`memory_search`, `memory_get`). ClawText adds automatic context injection and populates from existing data sources:
+Every time you send a prompt, ClawText:
 
-| Capability | memory-core | + ClawText | Benefit |
-|---|---|---|---|
-| **Storage & Persistence** | ✅ SQLite/JSON | — | Reliable data layer |
-| **Manual Search Tools** | ✅ memory_search tool | — | Agent-initiated lookup |
-| **Automatic Injection** | ❌ Manual | ✅ 5-7ms search | Always available |
-| **Relevance Filtering** | ❌ All results | ✅ 85%+ confidence | Smart filtering |
-| **Token Efficiency** | N/A | ✅ 12% budget | Safe, predictable |
-| **Data Ingestion** | ❌ Manual import | ✅ From files/web/channels | Populate from existing sources |
+1. Extracts keywords from your message
+2. Runs BM25 search across your indexed memory clusters
+3. Filters results to high-confidence matches (≥70%)
+4. Injects relevant context into the prompt before your model receives it
 
-## Features
+You don't do anything. It just works.
 
-- **Automatic context injection** — Searches on every prompt, injects relevant memories before agent execution
-- **BM25 keyword matching** — Fast, accurate, project-aware filtering
-- **Smart filtering** — Only injects memories above confidence threshold, preventing noise
-- **Token efficient** — Respects OpenClaw budgets (~12% per query)
-- **Agent-friendly** — Automated setup with exit codes; agents can configure at runtime
-- **Compatible** — Works alongside memory-core search tools; no conflicts
+---
+
+## How the Full System Works
+
+ClawText is one piece of a three-part pipeline:
+
+```
+ Discord / Files / Web
+         │
+         ▼
+ ┌──────────────────┐
+ │ clawtext-ingest  │  Fetches messages, filters text-only,
+ │ (ingest-all.mjs) │  deduplicates via SHA1, writes cluster
+ └────────┬─────────┘  .md files to ~/memory/clusters/
+          │
+          ▼
+ ┌──────────────────┐
+ │ build-clusters.js│  Reads all .md files, splits into
+ │ (cron: */30 min) │  ~600-char chunks, writes _index.json
+ └────────┬─────────┘
+          │
+          ▼
+ ┌──────────────────┐
+ │  ClawText RAG    │  On every prompt: BM25 search over
+ │ (before_prompt   │  _index.json → inject top matches
+ │  _build hook)    │  → model receives enriched prompt
+ └──────────────────┘
+```
+
+**Memory grows automatically:**
+- Nightly cron pulls new Discord messages (deduped — only new content)
+- 30-minute cron rebuilds the chunk index
+- Every prompt gets fresh, relevant context injected
+
+---
 
 ## Installation
 
-### For Agents (Recommended)
+### Prerequisites
 
-ClawText is designed to be installed and configured automatically by agents. Simply ask your agent to review and install the repository:
+- OpenClaw installed and running
+- Node.js ≥ 18
+- Git
 
-```
-"Review and install ClawText from https://github.com/ragesaq/clawtext"
-```
-
-The agent will handle: git clone, npm install, configuration, and validation. Exit codes indicate success (0) or issues (1–3).
-
-### Manual (Human Setup)
+### Install ClawText Extension
 
 ```bash
-git clone https://github.com/ragesaq/clawtext.git
-cd clawtext
+git clone https://github.com/ragesaq/clawtext.git ~/.openclaw/extensions/clawtext
+cd ~/.openclaw/extensions/clawtext
 npm install
-node install.js --auto-config
+npm run build
+openclaw plugins enable clawtext
 ```
 
-Enable in OpenClaw config:
-```json
-{
-  "skills": {
-    "clawtext": { "enabled": true }
-  }
-}
+Verify hooks are active:
+
+```bash
+openclaw plugins list
+# Should show: session_start, after_tool_call, before_prompt_build, session_end, before_compaction
 ```
 
-## Performance
+### Install ClawText-Ingest
 
-### Metrics
-
-| Metric | Value | Context |
-|--------|-------|---------|
-| **Search latency** | 5-7ms | Per-query BM25 matching |
-| **Injection overhead** | <100ms | Full cycle: search + format + inject |
-| **Memory footprint** | <8MB | All 476+ memories in RAM |
-| **Quality** | 85%+ avg confidence | Filtered to high-relevance results |
-| **False positives** | <5% | Cross-domain noise elimination |
-| **Token budget** | 12% of limit | Safe, predictable injection size |
-| **Safe margin** | 88% headroom | Leaves ample room for model output |
-
-### Why These Numbers Matter
-
-- **5-7ms search** — Imperceptible to users; no latency spike on prompt arrival
-- **<100ms total** — Injection happens before agent receives prompt; zero visible delay
-- **85%+ confidence** — Only relevant memories injected; reduces hallucination from bad context
-- **12% budget** — Memories take 1/8th of available tokens; model has plenty of room to think
-- **Tested with 476 memories** — Scales linearly; your memory archive will run at same speed
-
-## How It Works
-
-### Architecture
-
-```
-┌─────────────────────────────────────┐
-│ User Prompt                         │
-│ "Should agent restart the task?"    │
-└────────────────┬────────────────────┘
-                 │
-        ┌────────▼─────────┐
-        │ OpenClaw Gateway │
-        │ before_prompt    │
-        │ _build hook      │
-        └────────┬─────────┘
-                 │
-    ┌────────────┴───────────────┐
-    │                            │
-┌───▼──────────────────┐  ┌──────▼─────────────────┐
-│ memory-core          │  │ ClawText RAG           │
-│ (Storage Layer)      │  │ (Retrieval Layer)      │
-│                      │  │                        │
-│ • Stores memories    │  │ • 5-7ms BM25 search    │
-│ • SQLite/JSON        │  │ • Score relevance      │
-│ • Persists state     │  │ • Filter 85%+ quality  │
-│ • Handles CRUD       │  │ • Format for injection │
-└──────────────────────┘  └──────┬─────────────────┘
-    │                            │
-    └────────────┬───────────────┘
-                 │
-        ┌────────▼──────────────────┐
-        │ Enriched Prompt           │
-        │ "Should agent restart...  │
-        │                           │
-        │ <!-- Context:             │
-        │ [decision] Restart on:    │
-        │   - Network timeout >30s  │
-        │   - Rate limit 429 error  │
-        │                           │
-        │ [fact] Last restart:      │
-        │   Task resumed at step 4  │
-        │   of 12                   │
-        │ -->                       │
-        │                           │
-        │ Should agent restart...?"│
-        └────────┬──────────────────┘
-                 │
-        ┌────────▼──────────────┐
-        │ Agent/Model           │
-        │ (receives context)    │
-        └───────────────────────┘
+```bash
+# Already bundled at:
+~/.openclaw/workspace/skills/clawtext-ingest/
 ```
 
-### Search Pipeline
+Or clone separately:
 
-1. **Keyword Extraction** — Parse user prompt for search terms
-2. **BM25 Scoring** — Rank memories by relevance (5-7ms)
-3. **Confidence Filter** — Keep only 85%+ quality matches
-4. **Token Budget** — Ensure injection ≤12% of available tokens
-5. **Format** — Wrap memories in XML/comment block for model
-6. **Inject** — Prepend to prompt before agent execution
+```bash
+git clone https://github.com/ragesaq/clawtext-ingest.git \
+  ~/.openclaw/workspace/skills/clawtext-ingest
+cd ~/.openclaw/workspace/skills/clawtext-ingest
+npm install
+```
 
-### Why This Design
+---
 
-- **No embedding model required** — BM25 is fast, reliable, no latency penalty
-- **Memory-core compatible** — Reuses existing storage; no new dependencies
-- **Transparent to agents** — Works silently; agent gets enriched prompts automatically
-- **Token-aware** — Never overshoots budget; predictable impact on context window
-- **Failure-safe** — If search fails, injection skipped; original prompt still works
+## Making Memory Automatic
+
+This is the key configuration step. Two components need to be set up:
+
+### 1. The Master Ingest Script
+
+Copy or create `~/.openclaw/workspace/scripts/ingest-all.mjs`. This script:
+- Fetches all threads from your Discord forums via the bot API
+- Filters text-only (no attachments or embeds)
+- Deduplicates every message via SHA1 hash
+- Writes per-thread cluster `.md` files to `~/memory/clusters/`
+- Triggers a cluster index rebuild
+
+Configure your channels at the top of the script:
+
+```javascript
+const SOURCES = [
+  { id: '1476018965284261908', type: 'forum', name: 'rgcs-dev' },
+  { id: '1475021817168134144', type: 'forum', name: 'ai-projects' },
+  { id: '1477543809905721365', type: 'forum', name: 'moltmud-projects' },
+  { id: '1474997928056590339', type: 'channel', name: 'general' },
+  { id: '1475019186563448852', type: 'channel', name: 'status' },
+];
+```
+
+The script uses the bot token already stored by OpenClaw at:
+`~/.openclaw/credentials/discord.token.json`
+
+No separate token setup needed.
+
+### 2. The Cluster Builder
+
+`~/.openclaw/workspace/hooks/build-clusters.js` reads all `.md` files in `~/memory/clusters/`, splits them into ~600-character chunks, and writes `_index.json` — the file ClawText's RAG searches at query time.
+
+### 3. Cron Jobs
+
+Add both crons to keep memory fresh:
+
+```bash
+crontab -e
+```
+
+```cron
+# Rebuild RAG index every 30 minutes
+*/30 * * * * /usr/bin/node ~/.openclaw/workspace/hooks/build-clusters.js \
+  >> ~/memory/.cluster-rebuild.log 2>&1
+
+# Full Discord re-ingest nightly at 3 AM
+0 3 * * * /usr/bin/node ~/.openclaw/workspace/scripts/ingest-all.mjs \
+  >> ~/memory/.ingest-nightly.log 2>&1
+```
+
+After this setup, memory grows automatically from your Discord activity with no manual steps.
+
+---
+
+## File Layout
+
+```
+~/.openclaw/
+├── extensions/
+│   └── clawtext/                 ← ClawText RAG plugin
+│       ├── src/index.ts          ← Hook registration + RAG logic
+│       ├── src/rag.ts            ← BM25 search engine
+│       ├── dist/                 ← Compiled output
+│       └── package.json
+│
+└── workspace/
+    ├── scripts/
+    │   └── ingest-all.mjs        ← Master ingestion script
+    ├── hooks/
+    │   ├── build-clusters.js     ← Cluster index builder
+    │   ├── clawtext-extract      ← Session extraction hook
+    │   └── clawtext-flush        ← Session flush hook
+    └── skills/
+        └── clawtext-ingest/      ← Ingestion library
+
+~/memory/
+├── clusters/                     ← Per-thread markdown cluster files
+│   ├── rgcs-<id>-<name>.md
+│   ├── ai-projects-<id>-<name>.md
+│   └── _index.json               ← RAG search index (auto-rebuilt)
+├── .ingest_hashes.json           ← Deduplication hashes
+├── .ingest-nightly.log           ← Nightly ingest log
+└── .cluster-rebuild.log          ← Cluster rebuild log
+```
+
+---
+
+## Current Index Status
+
+As of March 5, 2026:
+
+| Metric | Value |
+|--------|-------|
+| Cluster files | 59 |
+| Indexed chunks | 5,879 |
+| Forums covered | 5 (rgcs-dev, ai-projects, moltmud-projects, general, status) |
+| Total threads | 56+ |
+| Total messages | ~9,000+ |
+
+---
 
 ## Configuration
 
-Out-of-the-box works for most use cases. Tunable per-agent:
+Edit in `src/index.ts` or `openclaw.json` plugin config:
 
-```javascript
+```json
 {
-  "maxMemories": 7,        // Memories per query (more = more context)
-  "minConfidence": 0.70,   // Quality threshold (higher = stricter filtering)
-  "tokenBudget": 4000,     // Injection limit (respects OpenClaw limits)
-  "injectMode": "smart"    // Full text vs snippets
+  "maxMemories": 7,
+  "minConfidence": 0.70,
+  "tokenBudget": 4000,
+  "injectMode": "smart"
 }
 ```
 
-### Tuning Guide
+| Option | Default | Effect |
+|--------|---------|--------|
+| `maxMemories` | 7 | Max chunks injected per prompt |
+| `minConfidence` | 0.70 | Minimum BM25 relevance score (0–1) |
+| `tokenBudget` | 4000 | Max tokens for injected context |
+| `injectMode` | `smart` | `smart` = full text, `snippets` = truncated |
 
-**For accuracy (reduce hallucinations):**
-```json
-{"minConfidence": 0.80, "maxMemories": 5}
-```
-Stricter filtering, fewer but higher-quality memories.
+**For stricter results** (less noise): `minConfidence: 0.80, maxMemories: 5`  
+**For broader context**: `minConfidence: 0.60, maxMemories: 10`  
+**Token-constrained**: `tokenBudget: 2000, injectMode: "snippets"`
 
-**For context richness (more background):**
-```json
-{"minConfidence": 0.60, "maxMemories": 10}
-```
-More memories injected; trade off precision for broader context.
-
-**For token-constrained environments:**
-```json
-{"tokenBudget": 2000, "injectMode": "snippets"}
-```
-Smaller injection; snippets instead of full text.
-
-## Data Ingestion
-
-ClawText works with any memories stored in OpenClaw's memory format (Markdown files in `~/.openclaw/workspace/memory/`). This enables you to populate context from existing sources:
-
-### Quick Start: Automated Ingestion
-
-For agents installing ClawText, use the companion **clawtext-ingest** skill (available via `npm install @openclaw/clawtext-ingest`):
-
-```javascript
-// Automated multi-source ingestion
-const ingest = require('clawtext-ingest');
-
-await ingest.fromFiles(['docs/**/*.md', 'notes/**/*.txt']);
-await ingest.fromUrls(['https://docs.example.com', 'https://wiki.example.com']);
-await ingest.fromDatasource('discord', {channel: 'decisions', limit: 500});
-
-// All data automatically formatted with YAML headers
-// Clusters rebuilt on next session start
-console.log('✅ Data imported and indexed');
-```
-
-This handles conversion, YAML header generation, deduplication, and cluster management automatically.
-
-### Manual: From Various Sources
-
-```bash
-# Convert project documentation to memory
-cat project-docs.md >> ~/.openclaw/workspace/MEMORY.md
-
-# Add context from chat exports
-node -e "
-const fs = require('fs');
-const chatLog = JSON.parse(fs.readFileSync('chat-export.json'));
-const memories = chatLog.map(m => 
-  \`---\ndate: \${m.date}\ntype: fact\n---\n\n## \${m.topic}\n\n\${m.content}\`
-).join('\n\n');
-fs.appendFileSync(process.env.HOME + '/.openclaw/workspace/memory/imports.md', memories);
-"
-```
-
-### From Web Pages
-
-```bash
-# Fetch and convert webpage to memory
-curl -s https://example.com/docs | \
-  pandoc --from html --to markdown | \
-  sed 's/^/---\ndate: '$(date +%Y-%m-%d)'\ntype: fact\n---\n\n/' >> \
-  ~/.openclaw/workspace/memory/web-imports.md
-```
-
-### From Channels
-
-```bash
-# Export Discord thread to memory (using discord.py or similar)
-python3 <<'EOF'
-import json
-import sys
-
-with open('discord-export.json') as f:
-    messages = json.load(f)
-
-memories = []
-for msg in messages:
-    memory = f"""---
-date: {msg['timestamp'][:10]}
-type: fact
-entities: [{msg['author']}]
 ---
 
-## {msg['author']} - {msg['timestamp']}
+## How Context Gets Injected
 
-{msg['content']}
-"""
-    memories.append(memory)
+When a prompt arrives, ClawText fires on the `before_prompt_build` hook:
 
-with open(f"{os.getenv('HOME')}/.openclaw/workspace/memory/discord-imports.md", 'a') as f:
-    f.write('\n\n'.join(memories))
-EOF
+```
+User: "What's the current RGCS smoothing algorithm?"
+
+→ ClawText extracts: ["RGCS", "smoothing", "algorithm"]
+→ BM25 search over 5,879 chunks
+→ Top 5 matches above 70% confidence selected
+→ Injected as context block before prompt:
+
+<!-- ClawText Context:
+[rgcs-dev] **[2026-03-04] ragesaq:** The smoothing uses a weighted...
+[rgcs-dev] **[2026-03-03] lumbot:** v1.2.324 introduced adaptive...
+...
+-->
+
+User: "What's the current RGCS smoothing algorithm?"
 ```
 
-### Best Practices for Ingestion
+Model receives both the context and the question. No manual lookup needed.
 
-1. **Add YAML headers** — Include `date`, `type` (fact/decision/code/etc), and relevant `entities`
-2. **Organize by source** — Use separate files (memory/web-imports.md, memory/discord-imports.md)
-3. **Include context** — Add enough metadata so memories make sense out of context
-4. **Rebuild clusters** — After bulk imports, ClawText auto-rebuilds on next session start
-5. **Start small** — Test with 10-50 imports before bulk loading thousands
+---
 
-### Example: Building Context from Multiple Sources
+## Active Hooks
+
+| Hook | Fires | Purpose |
+|------|-------|---------|
+| `session_start` | On session init | Load cluster index into memory |
+| `before_prompt_build` | Every prompt | BM25 search + context injection |
+| `after_tool_call` | After each tool | Buffer notable tool results |
+| `session_end` | Session close | Flush session buffer |
+| `before_compaction` | Pre-compaction | Persist session summary |
+
+---
+
+## Manual Ingest (One-Off)
+
+To ingest immediately without waiting for the nightly cron:
 
 ```bash
-#!/bin/bash
-
-# Import docs
-cat docs/architecture.md >> ~/.openclaw/workspace/memory/docs-import.md
-
-# Import previous chat history
-node extract-chat.js previous-sessions.json >> \
-  ~/.openclaw/workspace/memory/chat-import.md
-
-# Import team decisions from Discord
-python3 export-discord-decisions.py #decisions-channel >> \
-  ~/.openclaw/workspace/memory/decisions-import.md
-
-# Force cluster rebuild on next session
-rm -f ~/.openclaw/workspace/memory/clusters/*.json
-
-echo "Data imported. ClawText will rebuild clusters on next session start."
+node ~/.openclaw/workspace/scripts/ingest-all.mjs
 ```
 
-After ingestion, ClawText automatically:
-- Detects new memories on next session
-- Rebuilds clusters if they're stale
-- Indexes all imported data
-- Makes context available for injection
+To add a new channel to the pipeline, add it to the `SOURCES` array in `ingest-all.mjs` and run once manually. Subsequent nightly runs will pick up new messages automatically.
 
-This enables agents to build on existing knowledge bases—documentation, past decisions, team discussions—without manual indexing.
+---
 
-## Docs
+## Troubleshooting
 
-- **README.md** — Full guide, API, examples
-- **AGENT_INSTALL.md** — Automation checklist
-- **TROUBLESHOOTING.md** — 10 common issues + solutions
+**No context being injected:**
+1. Check `~/memory/clusters/_index.json` exists and has content
+2. Run `node ~/.openclaw/workspace/hooks/build-clusters.js` manually
+3. Check `openclaw plugins list` shows clawtext hooks active
+
+**Ingest not picking up new messages:**
+1. Check `~/memory/.ingest-nightly.log` for errors
+2. Verify bot token: `cat ~/.openclaw/credentials/discord.token.json`
+3. Run `node ~/.openclaw/workspace/scripts/ingest-all.mjs` manually
+
+**Clusters stale after ingest:**
+1. Run `node ~/.openclaw/workspace/hooks/build-clusters.js`
+2. Check the 30-min cron is installed: `crontab -l`
+
+**Plugin not loading:**
+```bash
+openclaw plugins enable clawtext
+openclaw gateway restart
+```
+
+---
+
+## Related
+
+- **[clawtext-ingest](../workspace/skills/clawtext-ingest/)** — Ingestion library and Discord fetcher
+- **[ingest-all.mjs](../workspace/scripts/ingest-all.mjs)** — Master ingest script (run manually or via cron)
+- **[build-clusters.js](../workspace/hooks/build-clusters.js)** — Cluster index builder
+
+---
 
 ## License
 
