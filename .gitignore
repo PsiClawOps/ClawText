@@ -1,0 +1,40 @@
+# Secrets / credentials
+.env
+.env.*
+*.env
+**/.env
+**/.env.*
+
+# Node
+node_modules/
+.npm/
+
+# Build artifacts
+dist/
+build/
+.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Runtime / state
+.tmp
+.openclaw/workspace-state.json
+memory/extract-buffer.jsonl
+memory/extract-state.json
+
+# Large binaries
+*.db
+*.sqlite
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+venv/
+cognee/venv/
