@@ -135,7 +135,21 @@ Agent: [Checks agent memory for decisions]
 | **Source** | Conversations | Bulk imports (repos, docs, exports) |
 | **Size** | ~100 bytes–10 KB | ~100 KB–MB |
 | **Query** | <1ms (always included) | ~50-200ms (on-demand) |
-| **Maintenance** | Auto | Manual versioning |
+| **Maintenance** | Auto | Agent-assisted (stale detection + re-ingest guidance) |
+
+The system monitors knowledge repos and alerts you when re-ingest is recommended:
+
+```bash
+# Check all knowledge repos
+npm run knowledge:status
+# Shows: project, memory count, last updated, age, status (🟢/🟡/🔴)
+
+# Health report includes staleness warnings
+npm run health
+# If repos are stale: recommends specific re-ingest commands
+```
+
+**Agent-assisted workflow:** The agent monitors repo age, flags stale ones (>90 days), and suggests the exact command to refresh:
 
 ---
 
