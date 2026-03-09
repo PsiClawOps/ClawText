@@ -1,6 +1,6 @@
-# ClawText — Memory for AI Agents
+# ClawText — Memory Skill for OpenClaw Agents
 
-**Version:** 1.3.0 | **Status:** Production
+**Type:** Skill | **Version:** 1.3.0 | **Status:** Production
 
 OpenClaw agents have basic memory with MEMORY.md, but it doesn't scale—it requires manual maintenance and can't grow beyond a few hundred entries. **ClawText transforms that into a robust, tiered system** — automatically captured from conversations, intelligently curated for speed, continuously tuned. Memory that grows with your project.
 
