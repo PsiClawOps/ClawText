@@ -4,103 +4,136 @@
 
 ---
 
-## What is Agent Memory?
+## The Problem: Agents Without Memory Are Limited
 
-AI models process each conversation in isolation. They have no built-in way to remember what happened yesterday, last week, or even earlier in the same project. This is fundamentally different from how humans work.
+Every time you talk to an AI agent, it processes your message in isolation. It doesn't know:
+- What project you were working on yesterday
+- What decisions you already made
+- What mistakes to avoid
+- Your preferences or style
+- What other agents have learned
 
-**The core problem:**
-- A human remembers: "We discussed this architectural decision last week. We decided to use X because of Y."
-- An AI agent without memory: "This is our first conversation. What do you want to do?"
+This works fine for one-off questions. But for agents that tackle real work—coding, debugging, managing projects, collaborating with other agents—this lack of continuity is crippling.
 
-For simple, stateless tasks (answering a one-off question, writing a poem), this doesn't matter. But for agents that work on **ongoing projects, maintain code, debug issues, or collaborate with other agents**, the lack of continuity becomes a critical limitation.
-
----
-
-## Why Memory Matters for Agents
-
-Memory solves three core problems:
-
-**1. Continuity** — Your agent understands the current state of your project without you explaining it every time.
-
-**2. Learning** — After fixing a bug, your agent remembers what went wrong and how you fixed it. It can apply that lesson to similar problems.
-
-**3. Collaboration** — Multiple agents can share context. One agent's work informs the next one's decisions. They build on each other instead of working in isolation.
-
-### Real-World Impact
-
-| Use Case | Without Memory | With Memory |
-|----------|---------------|-------------|
-| Long-running project | "What are we building?" (every session) | Knows the full project context and current blockers |
-| Debugging recurring issues | Suggests the same wrong fix twice | Learns from past fixes and avoids them |
-| Team of agents | Each agent reinvents the wheel | Agents share learnings and coordinate work |
-| User preferences | Asks "What format do you prefer?" repeatedly | Remembers and applies your style automatically |
+**The core issue:** Without memory, every agent interaction starts from zero. You're constantly re-explaining context. The agent can't build on past work. Knowledge is lost between sessions.
 
 ---
 
-## How ClawText Works
+## How Agent Memory Works
 
-ClawText implements a **tiered memory architecture** that keeps frequently-needed information fast and searchable, while archiving less-active memories for long-term storage.
+Modern AI agents solve this by **injecting relevant memories into the prompt before processing it**. This works like giving an agent background information before asking a question.
 
-The system operates in five stages:
+### Without Memory
+```
+User: "Fix the authentication bug"
+Agent: *searches for context* "I don't have any context. What project is this?"
+```
 
-1. **Capture** — Key information is extracted from conversations and tagged with metadata (timestamp, project, importance)
-2. **Store** — Memories are placed in the tier that matches their access pattern (hot cache for frequent retrieval, archive for deep searches)
-3. **Retrieve** — When your agent needs context, ClawText finds relevant memories instantly
-4. **Curate** — Over time, memories are promoted, deprioritized, or archived based on usage patterns
-5. **Clean** — Duplicates are removed, stale entries are archived, and the system stays maintainable
+### With Memory
+```
+Previous memories injected:
+- Decision: Authentication uses JWT with 24h expiry
+- Bug: Redis cache not invalidating on logout
+- Pattern: We prefer async/await over callbacks
 
-The result: Your agent has immediate access to what it needs, without the memory growing into an unmaintainable mess.
+User: "Fix the authentication bug"
+Agent: *already knows the architecture and past issues* "I see the Redis invalidation problem. Here's the fix..."
+```
+
+The agent's capabilities don't change. What changes is the **quality of decisions** because it has context.
+
+---
+
+## What ClawText Does
+
+ClawText is a **tiered memory system** designed specifically for agents. It ensures:
+
+1. **Fast retrieval** — Recent, high-value memories are instantly available (no latency added to prompts)
+2. **Relevance** — The system finds memories that actually matter to the current task
+3. **Automatic maintenance** — Old or duplicate memories are archived; important ones are promoted
+4. **Multi-agent collaboration** — Agents can share context and build on each other's work
+5. **Scalability** — Memory grows without becoming unmaintainable
+
+### The Four-Tier Architecture
+
+| Tier | Purpose | Latency | Size |
+|------|---------|---------|------|
+| **L1: Hot Cache** | Immediate recall for active projects and recent decisions | <1ms | ~50-300 items |
+| **L2: Curated** | Important context promoted from staging after validation | ~10ms | Indexed, searchable |
+| **L3: Archive** | Historical context, less-accessed but still searchable | ~100ms | Full history |
+| **L4: Staging** | Raw captures from conversations, awaiting curation | Write-only | Temporary buffer |
+
+When your agent needs context, it queries L1 first (instant), then L2 if needed. Archive is there if you want deep searches.
 
 ---
 
 ## Key Features
 
-### 🔥 Hot Memory Cache
-High-value memories stay in a fast, in-memory cache. Recent decisions, active projects, and frequently-referenced context are retrieved in microseconds — not seconds.
+### 🔥 Sub-Millisecond Retrieval
+Recent memories live in a hot cache. Injecting context into prompts adds microseconds, not milliseconds.
 
-### 🤖 Multi-Agent Visibility
-- **Shared** — Common knowledge visible to all agents (project decisions, architecture notes)
-- **Private** — Sensitive context only accessible to you or specific agents
-- **Cross-agent** — One agent can leave instructions or context for another
+### 🤖 Multi-Agent Memory
+- **Shared** — All agents can access common decisions and architecture notes
+- **Private** — Sensitive context stays isolated
+- **Cross-agent** — One agent can leave context for another to pick up
 
-### 🔄 Session Continuity
-Your agent tracks sessions with unique IDs. When it reconnects, it knows which past conversation is relevant and can pick up where you left off.
+### 🔄 Automatic Continuity
+Agents remember which session they were in and can pick up mid-conversation. No more "Wait, who are you? What are we doing?"
 
-### 💻 CLI for Programmatic Use
-Store, search, and manage memories without leaving your terminal:
+### 💻 Programmable API
+Add and search memories from code, CLI, or hooks:
 ```bash
-npm run memory -- add "Decision: Use PostgreSQL for state persistence"
-npm run memory -- search "database architecture"
-npm run memory -- list --project myapp --limit 10
+npm run memory -- add "Decision: Use PostgreSQL for state"
+npm run memory -- search "database" --project myapp
+npm run memory -- inject "current_task"  # Get context for prompt injection
 ```
 
-### 🏥 Observability & Self-Tuning
-Monitor your memory system's health:
+### 🏥 Self-Monitoring
+The system watches itself and alerts you to problems:
 ```bash
 npm run health
-# Shows: cache hit rate, review queue size, staleness, recommendations
+# → Reports: cache hit rate, staleness, review backlog, recommendations
 ```
 
-The system identifies its own bottlenecks and suggests fixes before they become problems.
+---
+
+## How It Fits Into Your Workflow
+
+**Without ClawText:**
+```
+Agent session 1 → Learns something → Lost after session ends
+Agent session 2 → Starts from zero → Relearns same lessons
+```
+
+**With ClawText:**
+```
+Agent session 1 → Learns something → Auto-captured and stored
+Agent session 2 → Context injected into prompt → Builds on session 1
+```
+
+The memory system runs in the background. Your agents just get smarter over time.
 
 ---
 
 ## Quick Start
 
 ```bash
+# Install
 git clone https://github.com/ragesaq/clawtext.git ~/.openclaw/workspace/skills/clawtext
 cd ~/.openclaw/workspace/skills/clawtext
 npm install
 npm run build
-npm test    # Verify installation (should see 15 clusters, 191 memories)
+
+# Test
+npm test    # Should show: 15 clusters, 191 memories, hot cache ready
 ```
 
 ## Documentation
 
-- **[Architecture](docs/ARCHITECTURE.md)** — How the system is organized (memory tiers, retrieval logic, performance)
-- **[Multi-Agent](docs/MULTI_AGENT.md)** — Setting up shared/private memory and agent collaboration
-- **[Curation](docs/CURATION.md)** — How memories are promoted, archived, and maintained
-- **[Testing](docs/TESTING.md)** — Verifying your setup works correctly
+- **[Architecture](docs/ARCHITECTURE.md)** — How memory tiers work, retrieval algorithms, performance tuning
+- **[Multi-Agent](docs/MULTI_AGENT.md)** — Shared/private memory, agent collaboration, cross-agent context
+- **[Curation](docs/CURATION.md)** — How memories are promoted, archived, deduplicated
+- **[Testing](docs/TESTING.md)** — Verify your installation and run integration tests
 
 ## GitHub
 
