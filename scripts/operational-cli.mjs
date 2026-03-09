@@ -25,6 +25,7 @@ import { OperationalMemoryManager } from '../dist/operational.js';
 import { OperationalCaptureManager } from '../dist/operational-capture.js';
 import { OperationalAggregationManager } from '../dist/operational-aggregation.js';
 import { OperationalReviewManager } from '../dist/operational-review.js';
+import { OperationalRetrievalManager } from '../dist/operational-retrieval.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
@@ -134,6 +135,16 @@ switch (command) {
     break;
   case 'report':
     generateReport();
+    break;
+  case 'retrieval:test':
+    if (!args[1]) {
+      console.error('Usage: npm run operational:retrieval:test -- "<message>"');
+      process.exit(1);
+    }
+    testRetrieval(args.slice(1).join(' '));
+    break;
+  case 'retrieval:health':
+    showRetrievalHealth();
     break;
   default:
     console.error(`Unknown command: ${command}`);
@@ -625,6 +636,74 @@ function correlatePatterns(patternKey) {
     console.log(`   ${corr.explanation}`);
     console.log('');
   });
+}
+
+function testRetrieval(message) {
+  console.log(`🔍 Testing retrieval for: "${message}"\n`);
+
+  const context = { userMessage: message };
+  
+  (async () => {
+    try {
+      const { OperationalRetrievalManager } = await import('../dist/operational-retrieval.js');
+      const retrieval = new OperationalRetrievalManager(process.env.HOME + '/.openclaw/workspace');
+      
+      const classification = retrieval.classifyTask(context);
+      const retrievalResult = await retrieval.retrieveForTask(context);
+      
+      console.log(`Task Classification:`);
+      console.log(`  Type: ${classification.taskType}`);
+      console.log(`  Confidence: ${(classification.confidence * 100).toFixed(0)}%`);
+      console.log(`  Should query operational: ${classification.shouldQueryOperational}`);
+      console.log(`  Reasoning: ${classification.reasoning}`);
+      console.log('');
+      
+      console.log(`Retrieval Result:`);
+      console.log(`  Patterns found: ${retrievalResult.totalPatterns}`);
+      console.log(`  Injection ready: ${retrievalResult.injectionReady}`);
+      
+      if (retrievalResult.patterns.length > 0) {
+        console.log('\nPatterns to inject:');
+        const formatted = retrieval.formatForInjection(retrievalResult.patterns);
+        console.log(formatted);
+      } else {
+        console.log('  No relevant operational patterns found.');
+      }
+    } catch (err) {
+      console.error('Error:', err.message);
+    }
+  })();
+}
+
+function showRetrievalHealth() {
+  (async () => {
+    try {
+      const { OperationalRetrievalManager } = await import('../dist/operational-retrieval.js');
+      const retrieval = new OperationalRetrievalManager(process.env.HOME + '/.openclaw/workspace');
+      const summary = retrieval.getHealthSummary();
+      
+      console.log(`
+📊 Operational Retrieval Health
+================================
+
+Total reviewed patterns: ${summary.totalReviewed}
+High recurrence (≥3): ${summary.highRecurrence}
+
+By Type:
+`);
+      
+      Object.entries(summary.byType).forEach(([type, count]) => {
+        console.log(`  ${type}: ${count}`);
+      });
+      
+      console.log('\nBy Scope:');
+      Object.entries(summary.byScope).forEach(([scope, count]) => {
+        console.log(`  ${scope}: ${count}`);
+      });
+    } catch (err) {
+      console.error('Error:', err.message);
+    }
+  })();
 }
 
 function generateReport() {

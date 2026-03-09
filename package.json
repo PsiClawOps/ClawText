@@ -32,7 +32,9 @@
     "operational:merge:find": "node scripts/operational-cli.mjs merge:find",
     "operational:merge": "node scripts/operational-cli.mjs merge",
     "operational:correlate": "node scripts/operational-cli.mjs correlate",
-    "operational:report": "node scripts/operational-cli.mjs report"
+    "operational:report": "node scripts/operational-cli.mjs report",
+    "operational:retrieval:test": "node scripts/operational-cli.mjs retrieval:test",
+    "operational:retrieval:health": "node scripts/operational-cli.mjs retrieval:health"
   },
   "keywords": [
     "memory",
