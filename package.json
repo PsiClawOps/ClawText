@@ -20,6 +20,8 @@
     "knowledge:status": "node scripts/knowledge-repos.mjs status",
     "operational:status": "node scripts/operational-cli.mjs status",
     "operational:review": "node scripts/operational-cli.mjs review",
+    "operational:review:queue": "node scripts/operational-cli.mjs review:queue",
+    "operational:review:stats": "node scripts/operational-cli.mjs review:stats",
     "operational:search": "node scripts/operational-cli.mjs search",
     "operational:promote": "node scripts/operational-cli.mjs promote",
     "operational:capture:error": "node scripts/operational-cli.mjs capture:error",

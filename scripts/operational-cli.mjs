@@ -5,7 +5,7 @@
  * 
  * Commands:
  * - operational:status - Show operational memory statistics
- * - operational:review - Show review queue (candidates awaiting review)
+ * - operational:review [approve|reject|defer] <patternKey> [reason] - Review a pattern
  * - operational:search <query> - Search operational memories
  * - operational:promote <patternKey> - Promote pattern to workspace
  * - operational:capture:error - Manually capture an error pattern
@@ -17,11 +17,14 @@
  * - operational:merge <primary> <duplicate> - Merge two patterns
  * - operational:correlate <patternKey> - Find correlated patterns
  * - operational:report - Full aggregation report
+ * - operational:review:queue - Show detailed review queue
+ * - operational:review:stats - Show review statistics
  */
 
 import { OperationalMemoryManager } from '../dist/operational.js';
 import { OperationalCaptureManager } from '../dist/operational-capture.js';
 import { OperationalAggregationManager } from '../dist/operational-aggregation.js';
+import { OperationalReviewManager } from '../dist/operational-review.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
@@ -32,6 +35,7 @@ const workspacePath = process.env.HOME + '/.openclaw/workspace';
 const memoryManager = new OperationalMemoryManager(workspacePath);
 const captureManager = new OperationalCaptureManager(workspacePath);
 const aggregationManager = new OperationalAggregationManager(workspacePath);
+const reviewManager = new OperationalReviewManager(workspacePath);
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -46,7 +50,37 @@ switch (command) {
     showStatus();
     break;
   case 'review':
-    showReviewQueue();
+    if (!args[1] || !args[2]) {
+      // Show review queue
+      showReviewQueueDetailed();
+    } else {
+      // Review action
+      const action = args[1];
+      const patternKey = args[2];
+      const reason = args.slice(3).join(' ');
+      
+      switch (action) {
+        case 'approve':
+          approvePattern(patternKey, reason);
+          break;
+        case 'reject':
+          rejectPattern(patternKey, reason);
+          break;
+        case 'defer':
+          deferPattern(patternKey, reason);
+          break;
+        default:
+          console.error(`Unknown review action: ${action}`);
+          console.log('Usage: npm run operational:review -- <approve|reject|defer> <patternKey> [reason]');
+          process.exit(1);
+      }
+    }
+    break;
+  case 'review:queue':
+    showReviewQueueDetailed();
+    break;
+  case 'review:stats':
+    showReviewStats();
     break;
   case 'search':
     if (!args[1]) {
@@ -115,9 +149,14 @@ Usage: npm run operational:<command> [args]
 
 Commands:
   operational:status              Show operational memory statistics
-  operational:review              Show review queue (candidates awaiting review)
+  operational:review              Show review queue (detailed)
+  operational:review approve <key> [notes]  Approve a pattern
+  operational:review reject <key> <reason>  Reject a pattern
+  operational:review defer <key> <reason>   Defer review
+  operational:review:queue        Show detailed review queue
+  operational:review:stats        Show review statistics
   operational:search <query>      Search operational memories
-  operational:promote <patternKey> Promote pattern to workspace guidance
+  operational:promote <key>       Promote pattern to workspace guidance
   operational:capture:error       Interactively capture an error pattern
   operational:capture:success     Interactively capture a success pattern
   operational:transfer-check <task> Check for relevant patterns before a task
@@ -125,12 +164,14 @@ Commands:
   operational:synthesize          Synthesize all candidates (improve quality)
   operational:merge:find          Find duplicate patterns
   operational:merge <primary> <duplicate> Merge two patterns
-  operational:correlate <patternKey> Find correlated patterns
+  operational:correlate <key>     Find correlated patterns
   operational:report              Full aggregation report
 
 Examples:
-  npm run operational:status
   npm run operational:review
+  npm run operational:review approve "pattern.key" "Verified and working"
+  npm run operational:review reject "pattern.key" "False positive"
+  npm run operational:review defer "pattern.key" "Need more evidence"
   npm run operational:search -- "compaction failure"
   npm run operational:promote -- "tool.exec.invalid_workdir"
   npm run operational:synthesize
@@ -191,6 +232,35 @@ Note: Patterns are auto-promoted to candidate status when they repeat (≥2 occu
 `);
 }
 
+function showReviewStats() {
+  const stats = reviewManager.getReviewStats();
+
+  console.log(`
+📋 Operational Memory Review Statistics
+========================================
+
+Total reviews: ${stats.totalReviews}
+
+By Decision:
+  Approved: ${stats.byDecision.approve}
+  Rejected: ${stats.byDecision.reject}
+  Merged:   ${stats.byDecision.merge}
+  Deferred: ${stats.byDecision.defer}
+
+Recent Reviews:
+`);
+
+  if (stats.recentReviews.length === 0) {
+    console.log('  No reviews yet.');
+  } else {
+    stats.recentReviews.forEach(log => {
+      const emoji = { approve: '✅', reject: '❌', merge: '🔀', defer: '⏳' }[log.decision];
+      console.log(`  ${emoji} ${log.patternKey} → ${log.decision} (${log.reviewer})`);
+      if (log.reason) console.log(`     Reason: ${log.reason}`);
+    });
+  }
+}
+
 function showReviewQueue() {
   const candidates = memoryManager.getReviewQueue();
 
@@ -219,11 +289,66 @@ function showReviewQueue() {
   });
 
   console.log('Actions:');
-  console.log('  - Review each candidate and decide: approve, reject, or merge');
-  console.log('  - Use: npm run operational:promote -- <patternKey>');
-  console.log('  - Run "npm run operational:synthesize" to auto-improve quality');
-  console.log('  - Run "npm run operational:merge:find" to find duplicates');
+  console.log('  npm run operational:review approve "<patternKey>" [notes]');
+  console.log('  npm run operational:review reject "<patternKey>" "<reason>"');
+  console.log('  npm run operational:review defer "<patternKey>" "<reason>"');
+  console.log('  npm run operational:merge -- "<primary>" "<duplicate>"');
   console.log('');
+}
+
+function showReviewQueueDetailed() {
+  const queue = reviewManager.getReviewQueueWithDetails();
+
+  if (queue.length === 0) {
+    console.log('✅ Review queue is empty. No candidates awaiting review.');
+    return;
+  }
+
+  console.log(reviewManager.generateReviewReport());
+}
+
+function approvePattern(patternKey, notes) {
+  const result = reviewManager.approve(patternKey, 'user', notes);
+  
+  if (result) {
+    console.log(`✅ Pattern approved: ${patternKey}`);
+    console.log(`   Status: ${result.previousStatus} → ${result.newStatus}`);
+    if (notes) console.log(`   Notes: ${notes}`);
+  } else {
+    console.error(`❌ Failed to approve pattern: ${patternKey}`);
+    process.exit(1);
+  }
+}
+
+function rejectPattern(patternKey, reason) {
+  if (!reason) {
+    console.error('❌ Reason is required for rejection');
+    console.log('Usage: npm run operational:review reject <patternKey> "<reason>"');
+    process.exit(1);
+  }
+
+  const result = reviewManager.reject(patternKey, reason, 'user');
+  
+  if (result) {
+    console.log(`❌ Pattern rejected: ${patternKey}`);
+    console.log(`   Status: ${result.previousStatus} → ${result.newStatus}`);
+    console.log(`   Reason: ${reason}`);
+  } else {
+    console.error(`❌ Failed to reject pattern: ${patternKey}`);
+    process.exit(1);
+  }
+}
+
+function deferPattern(patternKey, reason) {
+  const result = reviewManager.defer(patternKey, reason || 'No reason provided', 'user');
+  
+  if (result) {
+    console.log(`⏳ Pattern deferred: ${patternKey}`);
+    console.log(`   Reason: ${reason || 'No reason provided'}`);
+  } else {
+    console.error(`❌ Failed to defer pattern: ${patternKey}`);
+    process.exit(1);
+  }
 }
 
 function searchMemories(query) {
@@ -542,4 +667,4 @@ function generateReport() {
 }
 
 // Export for programmatic use
-export { memoryManager, captureManager, aggregationManager };
+export { memoryManager, captureManager, aggregationManager, reviewManager };
