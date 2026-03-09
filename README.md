@@ -96,60 +96,66 @@ ClawText solves this with a **tiered architecture**:
 | **L1: Hot Cache** | Active project context, recent decisions, current blockers | <1ms | ~50-300 items |
 | **L2: Curated** | Validated, deduplicated, ranked memories | ~10ms | Indexed, searchable |
 | **L3: Archive** | Historical context for deep searches | ~100ms | Full history |
-| **L4: Staging** | Raw captures awaiting review; also entry point for bulk ingest | Write-only | Temporary buffer |
+| **L4: Staging** | Raw captures awaiting review; also buffer for bulk ingest | Write-only | Temporary |
 
-Your agent queries L1 first (instant), then L2 if needed. Archive is there for deep searches. L4 feeds both the normal curation pipeline and bulk ingestion.
+Your agent queries L1 first (instant), then L2 if needed. Archive is there for deep searches. L4 feeds both conversational capture and bulk ingestion.
 
 ---
 
-## Ingestion: Bulk Knowledge Loading
+## Two Memory Paths: Conversational vs. Bulk
 
-ClawText's ingest system loads large information stores in bulk—repos, documentation, Discord exports, wikis—and routes them to **knowledge repositories** instead of agent memory.
+ClawText handles two distinct types of knowledge, each optimized for its use case.
 
-**Why separate paths?**
-- **Agent memory** (conversational) → Small, focused, always injected, fast
-- **Knowledge repos** (ingested) → Large, queryable on-demand, versioned
+### Agent Memory (Conversational)
+Captures from your ongoing conversations. Automatically promoted through the tiers. Injected into every prompt.
 
-This keeps agent prompts lean while giving agents access to deep knowledge when needed.
+**Examples:** Decisions, lessons learned, project state, current blockers
 
-### Quick Examples
+### Knowledge Repositories (Bulk Ingest)
+Large information sources loaded in bulk. Organized by project. Queryable on-demand (not in every prompt).
+
+**Examples:** Codebases, documentation, Discord thread exports, wikis, design docs
+
+### Why Separate?
+
+Injecting a 500KB codebase into every prompt wastes tokens and confuses the LLM. Instead, knowledge repos live separately:
 
 ```bash
-# Ingest a GitHub repo
+# Ingest a GitHub repo into the knowledge base
 npm run ingest -- https://github.com/myteam/myproject.git \
   --project myapp --type repo
 
-# Ingest Discord thread export
-npm run ingest -- threads-export-2026-03.json \
-  --project myapp --cluster "decisions"
-
-# Agent workflow: uses both automatically
+# Agent workflow
 User: "How does auth work?"
-Agent: [Checks agent memory for decisions]
-       [Queries knowledge repo for code examples]
-       "We use JWT. Here's the flow..."
+Agent: [Checks agent memory for decisions] (fast, <1ms)
+       [Queries knowledge repo for code examples] (on-demand, ~100ms)
+       "We use JWT. Here's the implementation..."
 ```
 
-| | Agent Memory | Knowledge Repo |
-|---|---|---|
-| **Source** | Conversations | Bulk imports (repos, docs, exports) |
-| **Size** | ~100 bytes–10 KB | ~100 KB–MB |
-| **Query** | <1ms (always included) | ~50-200ms (on-demand) |
-| **Maintenance** | Auto | Agent-assisted (stale detection + re-ingest guidance) |
+### Maintenance
 
-The system monitors knowledge repos and alerts you when re-ingest is recommended:
+| Aspect | Agent Memory | Knowledge Repos |
+|--------|--------------|-----------------|
+| **Source** | Conversations | Bulk imports (repos, docs, exports) |
+| **Size** | ~100 bytes–10 KB per item | ~100 KB–MB per project |
+| **Injection** | Always (hot cache, <1ms) | On-demand (when relevant) |
+| **Maintenance** | Auto (promote, dedup, archive) | Agent-assisted (staleness alerts + re-ingest guidance) |
+
+**Agent-assisted knowledge repo maintenance:**
+
+The system monitors repo age and alerts you when updates are needed:
 
 ```bash
-# Check all knowledge repos
+# View all knowledge repos and their age
 npm run knowledge:status
-# Shows: project, memory count, last updated, age, status (🟢/🟡/🔴)
+# Output: 🟢 fresh (<30d) | 🟡 aging (30-90d) | 🔴 stale (>90d)
 
-# Health report includes staleness warnings
+# Health check includes repo recommendations
 npm run health
-# If repos are stale: recommends specific re-ingest commands
+# If stale: "Knowledge repo 'myapp' is 120 days old — re-ingest recommended"
 ```
 
-**Agent-assisted workflow:** The agent monitors repo age, flags stale ones (>90 days), and suggests the exact command to refresh:
+Your agent can have a conversation about whether to refresh a repo, see the specific command needed, and execute it—rather than manually running shell scripts.
 
 ---
 
