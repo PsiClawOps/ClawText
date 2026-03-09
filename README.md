@@ -80,34 +80,31 @@ ClawText fills this gap.
 
 **Benefit:** Memory adds dynamic context that evolves with your project. Your static system prompts stay clean; memories handle the specific, changeable stuff.
 
-### Why a Simple Memory System Isn't Enough
+### The Architecture: Four Tiers
 
-A basic "store everything" approach creates problems:
+A simple "store everything" approach creates problems:
+- **Speed** — Searching all old memories adds latency
+- **Noise** — Irrelevant memories waste tokens
+- **Duplicates** — The same decision stored multiple times
+- **No ranking** — Old memories mix with important ones
+- **Unbounded growth** — Memory becomes unmaintainable
 
-- **Speed** — Searching all old memories adds latency. Your agent gets slower over time.
-- **Noise** — Irrelevant memories waste tokens and confuse the LLM.
-- **Duplicates** — "Use async/await" gets stored 10 times. Which is current?
-- **No ranking** — Old memories mix with important ones. System can't prioritize.
-- **Unbounded growth** — Memory becomes an unmaintainable pile of entries.
+ClawText solves this with a **tiered architecture**:
 
-### What ClawText Does Differently
+| Tier | Purpose | Latency | Size |
+|------|---------|---------|------|
+| **L1: Hot Cache** | Active project context, recent decisions, current blockers | <1ms | ~50-300 items |
+| **L2: Curated** | Validated, deduplicated, ranked memories | ~10ms | Indexed, searchable |
+| **L3: Archive** | Historical context for deep searches | ~100ms | Full history |
+| **L4: Staging** | Raw captures awaiting review; also entry point for bulk ingest | Write-only | Temporary buffer |
 
-ClawText is a **tiered memory system** that solves these problems:
-
-| Tier | Purpose | Speed |
-|------|---------|-------|
-| **L1: Hot Cache** | Active project context, recent decisions, current blockers | <1ms |
-| **L2: Curated** | Validated, deduplicated, ranked memories | ~10ms |
-| **L3: Archive** | Historical context for deep searches | ~100ms |
-| **L4: Staging** | Raw captures awaiting review; also entry point for bulk ingest | Write-only |
-
-Your agent gets fast, relevant context. Memory stays maintainable. Your system prompts stay focused on who you are; ClawText handles what you've learned.
+Your agent queries L1 first (instant), then L2 if needed. Archive is there for deep searches. L4 feeds both the normal curation pipeline and bulk ingestion.
 
 ---
 
 ## Ingestion: Bulk Knowledge Loading
 
-L4 (Staging) serves a dual purpose: it captures conversational memories *and* receives bulk ingests. ClawText's ingest system loads large information stores in bulk—repos, documentation, Discord exports, wikis—and routes them to **knowledge repositories** instead of agent memory.
+ClawText's ingest system loads large information stores in bulk—repos, documentation, Discord exports, wikis—and routes them to **knowledge repositories** instead of agent memory.
 
 **Why separate paths?**
 - **Agent memory** (conversational) → Small, focused, always injected, fast
@@ -142,31 +139,10 @@ Agent: [Checks agent memory for decisions]
 
 ---
 
-ClawText is a **tiered memory system** designed specifically for agents. It ensures:
-
-1. **Fast retrieval** — Recent, high-value memories are instantly available (no latency added to prompts)
-2. **Relevance** — The system finds memories that actually matter to the current task
-3. **Automatic maintenance** — Old or duplicate memories are archived; important ones are promoted
-4. **Multi-agent collaboration** — Agents can share context and build on each other's work
-5. **Scalability** — Memory grows without becoming unmaintainable
-
-### The Four-Tier Architecture
-
-| Tier | Purpose | Latency | Size |
-|------|---------|---------|------|
-| **L1: Hot Cache** | Immediate recall for active projects and recent decisions | <1ms | ~50-300 items |
-| **L2: Curated** | Important context promoted from staging after validation | ~10ms | Indexed, searchable |
-| **L3: Archive** | Historical context, less-accessed but still searchable | ~100ms | Full history |
-| **L4: Staging** | Raw captures from conversations, awaiting curation | Write-only | Temporary buffer |
-
-When your agent needs context, it queries L1 first (instant), then L2 if needed. Archive is there if you want deep searches.
-
----
-
 ## Key Features
 
 ### 🔥 Sub-Millisecond Retrieval
-Recent memories live in a hot cache. Injecting context into prompts adds microseconds, not milliseconds.
+Recent memories live in L1 hot cache. Injecting context into prompts adds microseconds, not milliseconds.
 
 ### 🤖 Multi-Agent Memory
 - **Shared** — All agents can access common decisions and architecture notes
