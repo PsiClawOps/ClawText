@@ -17,14 +17,29 @@
     "memory": "node cli.mjs",
     "ingest:dedupe": "node scripts/ingest-dedupe.mjs",
     "ingest:dedupe:watch": "node scripts/ingest-dedupe.mjs --watch",
-    "knowledge:status": "node scripts/knowledge-repos.mjs status"
+    "knowledge:status": "node scripts/knowledge-repos.mjs status",
+    "operational:status": "node scripts/operational-cli.mjs status",
+    "operational:review": "node scripts/operational-cli.mjs review",
+    "operational:search": "node scripts/operational-cli.mjs search",
+    "operational:promote": "node scripts/operational-cli.mjs promote",
+    "operational:capture:error": "node scripts/operational-cli.mjs capture:error",
+    "operational:capture:success": "node scripts/operational-cli.mjs capture:success",
+    "operational:transfer-check": "node scripts/operational-cli.mjs transfer-check"
   },
-  "keywords": ["memory", "rag", "context-injection"],
+  "keywords": [
+    "memory",
+    "rag",
+    "context-injection"
+  ],
   "dependencies": {
+    "js-yaml": "^4.1.0",
     "openclaw": "^2026.3.1"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "typescript": "^5.3.0"
   },
-  "openclaw.extensions": ["./dist/index.js"]
+  "openclaw.extensions": [
+    "./dist/index.js"
+  ]
 }
