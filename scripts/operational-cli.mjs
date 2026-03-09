@@ -12,10 +12,16 @@
  * - operational:capture:success - Manually capture a success pattern
  * - operational:transfer-check <task> - Check for relevant operational patterns before a task
  * - operational:aggregation:stats - Show aggregation statistics
+ * - operational:synthesize - Synthesize all candidates (improve quality)
+ * - operational:merge:find - Find duplicate patterns
+ * - operational:merge <primary> <duplicate> - Merge two patterns
+ * - operational:correlate <patternKey> - Find correlated patterns
+ * - operational:report - Full aggregation report
  */
 
 import { OperationalMemoryManager } from '../dist/operational.js';
 import { OperationalCaptureManager } from '../dist/operational-capture.js';
+import { OperationalAggregationManager } from '../dist/operational-aggregation.js';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
@@ -25,6 +31,7 @@ const workspacePath = process.env.HOME + '/.openclaw/workspace';
 
 const memoryManager = new OperationalMemoryManager(workspacePath);
 const captureManager = new OperationalCaptureManager(workspacePath);
+const aggregationManager = new OperationalAggregationManager(workspacePath);
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -71,6 +78,29 @@ switch (command) {
   case 'aggregation:stats':
     showAggregationStats();
     break;
+  case 'synthesize':
+    synthesizeAll();
+    break;
+  case 'merge:find':
+    findDuplicatePatterns();
+    break;
+  case 'merge':
+    if (!args[1] || !args[2]) {
+      console.error('Usage: npm run operational:merge -- <primary> <duplicate>');
+      process.exit(1);
+    }
+    mergePatterns(args[1], args[2]);
+    break;
+  case 'correlate':
+    if (!args[1]) {
+      console.error('Usage: npm run operational:correlate -- <patternKey>');
+      process.exit(1);
+    }
+    correlatePatterns(args[1]);
+    break;
+  case 'report':
+    generateReport();
+    break;
   default:
     console.error(`Unknown command: ${command}`);
     printUsage();
@@ -92,14 +122,22 @@ Commands:
   operational:capture:success     Interactively capture a success pattern
   operational:transfer-check <task> Check for relevant patterns before a task
   operational:aggregation:stats   Show aggregation statistics
+  operational:synthesize          Synthesize all candidates (improve quality)
+  operational:merge:find          Find duplicate patterns
+  operational:merge <primary> <duplicate> Merge two patterns
+  operational:correlate <patternKey> Find correlated patterns
+  operational:report              Full aggregation report
 
 Examples:
   npm run operational:status
   npm run operational:review
   npm run operational:search -- "compaction failure"
   npm run operational:promote -- "tool.exec.invalid_workdir"
-  npm run operational:transfer-check -- "deploying gateway config"
-  npm run operational:capture:error
+  npm run operational:synthesize
+  npm run operational:merge:find
+  npm run operational:merge -- "pattern1" "pattern2"
+  npm run operational:correlate -- "pattern1"
+  npm run operational:report
 `);
 }
 
@@ -183,6 +221,8 @@ function showReviewQueue() {
   console.log('Actions:');
   console.log('  - Review each candidate and decide: approve, reject, or merge');
   console.log('  - Use: npm run operational:promote -- <patternKey>');
+  console.log('  - Run "npm run operational:synthesize" to auto-improve quality');
+  console.log('  - Run "npm run operational:merge:find" to find duplicates');
   console.log('');
 }
 
@@ -278,7 +318,6 @@ Step 1: Basic Information
 --------------------------
 `);
 
-  // For now, create a simple placeholder
   const entry = captureManager.capture({
     type: 'error-pattern',
     summary: 'Interactive error capture (placeholder)',
@@ -369,5 +408,138 @@ Checking for relevant operational patterns before this task...
   console.log('Consider these patterns before proceeding.');
 }
 
+function synthesizeAll() {
+  console.log('🔄 Synthesizing all candidates...\n');
+
+  const results = aggregationManager.synthesizeAll();
+  
+  if (results.length === 0) {
+    console.log('✅ No candidates to synthesize.');
+    return;
+  }
+
+  let improved = 0;
+  results.forEach(result => {
+    if (result.improved) {
+      improved++;
+      console.log(`✅ ${result.patternKey}`);
+      result.changes.forEach(change => console.log(`   ${change}`));
+    } else {
+      console.log(`- ${result.patternKey} (no changes needed)`);
+    }
+  });
+
+  console.log(`\n✅ Synthesis complete: ${improved} patterns improved.`);
+}
+
+function findDuplicatePatterns() {
+  console.log('🔍 Finding duplicate patterns...\n');
+
+  const suggestions = aggregationManager.findDuplicatePatterns();
+  
+  if (suggestions.length === 0) {
+    console.log('✅ No duplicate patterns found.');
+    return;
+  }
+
+  console.log(`Found ${suggestions.length} potential duplicates:\n`);
+
+  suggestions.forEach((suggestion, i) => {
+    console.log(`${i + 1}. ${suggestion.primaryPatternKey} ← ${suggestion.duplicatePatternKey}`);
+    console.log(`   Reason: ${suggestion.reason}`);
+    console.log(`   Confidence: ${(suggestion.confidence * 100).toFixed(0)}%`);
+    console.log('');
+  });
+
+  console.log('To merge: npm run operational:merge -- <primary> <duplicate>');
+}
+
+function mergePatterns(primaryKey, duplicateKey) {
+  const primary = memoryManager.get(primaryKey);
+  const duplicate = memoryManager.get(duplicateKey);
+
+  if (!primary) {
+    console.error(`Primary pattern not found: ${primaryKey}`);
+    process.exit(1);
+  }
+
+  if (!duplicate) {
+    console.error(`Duplicate pattern not found: ${duplicateKey}`);
+    process.exit(1);
+  }
+
+  console.log(`Merging ${duplicateKey} into ${primaryKey}...`);
+  console.log(`  Primary recurrence: ${primary.recurrenceCount}`);
+  console.log(`  Duplicate recurrence: ${duplicate.recurrenceCount}`);
+
+  const merged = aggregationManager.mergePatterns(primaryKey, duplicateKey);
+  
+  if (merged) {
+    console.log(`\n✅ Merge complete!`);
+    console.log(`   New recurrence: ${merged.recurrenceCount}`);
+    console.log(`   Evidence items: ${merged.evidence.length}`);
+    console.log(`   Duplicate archived.`);
+  }
+}
+
+function correlatePatterns(patternKey) {
+  console.log(`🔗 Finding correlations for ${patternKey}...\n`);
+
+  const correlations = aggregationManager.findCorrelatedPatterns(patternKey);
+  
+  if (correlations.length === 0) {
+    console.log('✅ No correlated patterns found.');
+    return;
+  }
+
+  console.log(`Found ${correlations.length} correlations:\n`);
+
+  correlations.forEach((corr, i) => {
+    console.log(`${i + 1}. ${corr.patternKey1} ${corr.correlationType} ${corr.patternKey2}`);
+    console.log(`   Confidence: ${(corr.confidence * 100).toFixed(0)}%`);
+    console.log(`   ${corr.explanation}`);
+    console.log('');
+  });
+}
+
+function generateReport() {
+  console.log('📊 Operational Memory Aggregation Report\n');
+  console.log('='.repeat(60));
+  console.log('');
+
+  const report = aggregationManager.getAggregationReport();
+
+  console.log(`Total candidates: ${report.totalCandidates}`);
+  console.log(`Synthesized: ${report.synthesized.length} patterns`);
+  console.log(`Merge suggestions: ${report.mergeSuggestions.length}`);
+  console.log(`High recurrence patterns (≥3): ${report.highRecurrencePatterns.length}`);
+  console.log(`Patterns needing review: ${report.patternsNeedingReview.length}`);
+  console.log('');
+
+  if (report.patternsNeedingReview.length > 0) {
+    console.log('⚠️  Patterns needing review:');
+    report.patternsNeedingReview.forEach(p => {
+      const issues = [];
+      if (p.rootCause === 'TBD') issues.push('rootCause=TBD');
+      if (p.fix === 'TBD') issues.push('fix=TBD');
+      if (p.recurrenceCount >= 5 && p.confidence < 0.7) issues.push('low confidence');
+      console.log(`   - ${p.patternKey}: ${issues.join(', ')}`);
+    });
+    console.log('');
+  }
+
+  if (report.mergeSuggestions.length > 0) {
+    console.log('🔀 Merge suggestions:');
+    report.mergeSuggestions.forEach(s => {
+      console.log(`   - ${s.primaryPatternKey} ← ${s.duplicatePatternKey} (${(s.confidence * 100).toFixed(0)}%)`);
+    });
+    console.log('');
+  }
+
+  console.log('='.repeat(60));
+  console.log('Run "npm run operational:synthesize" to auto-improve candidates');
+  console.log('Run "npm run operational:merge:find" to find duplicates');
+}
+
 // Export for programmatic use
-export { memoryManager, captureManager };
+export { memoryManager, captureManager, aggregationManager };

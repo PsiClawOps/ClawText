@@ -25,7 +25,12 @@
     "operational:capture:error": "node scripts/operational-cli.mjs capture:error",
     "operational:capture:success": "node scripts/operational-cli.mjs capture:success",
     "operational:transfer-check": "node scripts/operational-cli.mjs transfer-check",
-    "operational:aggregation:stats": "node scripts/operational-cli.mjs aggregation:stats"
+    "operational:aggregation:stats": "node scripts/operational-cli.mjs aggregation:stats",
+    "operational:synthesize": "node scripts/operational-cli.mjs synthesize",
+    "operational:merge:find": "node scripts/operational-cli.mjs merge:find",
+    "operational:merge": "node scripts/operational-cli.mjs merge",
+    "operational:correlate": "node scripts/operational-cli.mjs correlate",
+    "operational:report": "node scripts/operational-cli.mjs report"
   },
   "keywords": [
     "memory",
