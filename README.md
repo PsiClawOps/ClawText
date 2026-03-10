@@ -204,6 +204,8 @@ Integration adapters for various data sources, loaded only when needed.
 
 **Full Transparency**
 Everything runs on your machine or your OpenClaw Gateway. You can see exactly how it works.
+
+---
 | Operational learning lane | ✅ | ❌ | ❌ | ❌ |
 | Failure capture + pattern review | ✅ | ❌ | ❌ | ❌ |
 | Promotion to durable guidance | ✅ | ❌ | ❌ | ❌ |
