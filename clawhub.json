@@ -1,8 +1,8 @@
 {
   "name": "clawtext",
-  "version": "1.3.0",
-  "title": "ClawText - Comprehensive Memory Skill for OpenClaw Agents",
-  "description": "Complete memory platform for OpenClaw: capture, ingest, retrieve, curate, and maintain memory with hot cache, multi-agent support, and session continuity.",
+  "version": "1.4.0",
+  "title": "ClawText - Comprehensive Memory Platform for OpenClaw",
+  "description": "Complete knowledge lifecycle system: capture conversational context, ingest multi-source knowledge, learn from operational patterns. Tiered retrieval, automatic curation, operational learning lane with capture/review/promotion.",
   "author": "ragesaq",
   "license": "MIT",
   "repository": "https://github.com/ragesaq/clawtext",
@@ -13,7 +13,9 @@
     "context-injection",
     "semantic-search",
     "curation",
-    "knowledge-management"
+    "knowledge-management",
+    "operational-learning",
+    "self-improvement"
   ],
   "keywords": [
     "rag",
@@ -28,44 +30,51 @@
     "hot-cache",
     "multi-agent",
     "curation",
-    "ingest"
+    "ingest",
+    "operational-learning",
+    "self-healing",
+    "failure-capture",
+    "pattern-review"
   ],
   "features": [
-    "Hot memory cache (300 items, JSON-backed, self-warming)",
-    "Multi-level memory lanes (hot/curated/archive/staging)",
+    "Three-lane architecture: working memory, knowledge ingest, operational learning",
+    "Hot memory cache (300 items, <1ms retrieval, JSON-backed, self-warming)",
+    "Multi-level memory tiers (hot/curated/archive/staging)",
     "Multi-agent memory (shared/private/cross-agent visibility)",
     "Session continuity (sessionId + relatesToSession)",
     "Token budget handling with graceful degradation",
-    "CLI for agent workflows (add/search/list/stats)",
+    "Operational learning: capture failures, detect patterns, review with agents, promote guidance",
+    "Multi-source ingest: repos, docs, forums, JSON, text (bundled engine)",
+    "CLI for agent workflows (memory, ingest, operational commands)",
     "Health reports with actionable recommendations",
     "Auto-dedupe for ingest staging",
     "BM25 hybrid search with project weighting",
-    "Memory API for programmatic access"
+    "Memory API for programmatic access",
+    "Scheduled maintenance: review digests, candidate backlog, health checks"
   ],
-  "companion_tools": {
-    "clawtext-ingest": "Multi-source data ingestion for populating memory"
-  },
   "documentation": {
-    "quick_start": "https://github.com/ragesaq/clawtext#quick-install",
+    "quick_start": "https://github.com/ragesaq/clawtext#quick-start",
+    "skill_definition": "https://github.com/ragesaq/clawtext/blob/main/SKILL.md",
+    "agent_install": "https://github.com/ragesaq/clawtext/blob/main/AGENT_INSTALL.md",
     "architecture": "https://github.com/ragesaq/clawtext/blob/main/docs/ARCHITECTURE.md",
+    "operational_learning": "https://github.com/ragesaq/clawtext/blob/main/docs/OPERATIONAL_LEARNING.md",
+    "ingest": "https://github.com/ragesaq/clawtext/blob/main/docs/INGEST.md",
     "memory_schema": "https://github.com/ragesaq/clawtext/blob/main/docs/MEMORY_SCHEMA.md",
     "multi_agent": "https://github.com/ragesaq/clawtext/blob/main/docs/MULTI_AGENT.md",
     "curation": "https://github.com/ragesaq/clawtext/blob/main/docs/CURATION.md",
-    "hot_cache": "https://github.com/ragesaq/clawtext/blob/main/docs/HOT_CACHE.md",
-    "ingest": "https://github.com/ragesaq/clawtext/blob/main/docs/INGEST.md"
+    "hot_cache": "https://github.com/ragesaq/clawtext/blob/main/docs/HOT_CACHE.md"
   },
-  "relatedSkills": [
-    "clawtext-ingest"
-  ],
   "tags": [
     "production-ready",
-    "v1.3.0",
+    "v1.4.0",
     "tested",
     "memory-system",
     "holistic-memory",
     "multi-agent",
     "curation",
-    "cli"
+    "cli",
+    "operational-learning",
+    "self-healing"
   ],
   "tested": true,
   "maintained": true,
@@ -77,5 +86,12 @@
     "max_injection_tokens": 4000,
     "hot_cache_items": 300,
     "recommended_max_memories": 7
+  },
+  "changelog": {
+    "1.4.0": "Bundled ingest engine, operational learning lane (capture/review/promotion/maintenance), three-lane architecture complete",
+    "1.3.0": "Hot cache optimization, BM25 scoring, plugin activation + allowlist",
+    "1.2.0": "Tiered memory (L1-L4), cluster rebuild, validate-rag tooling",
+    "1.1.0": "Initial multi-source ingest, deduplication pipeline",
+    "1.0.0": "Initial release — basic memory injection + retrieval"
   }
 }
