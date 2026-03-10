@@ -71,8 +71,11 @@ function parseContent(raw) {
     } catch {}
   }
 
+  const KNOWN_YAML_KEYS = new Set(['date','project','type','area','entities','keywords','pattern-key','confidence','source','updatedAt']);
+
   const lines = raw.split('\n');
   const meta = {};
+  const extraLines = []; // lines that aren't standard YAML keys → might be content
   let bodyStart = lines.length;
 
   for (let i = 0; i < lines.length; i++) {
@@ -88,11 +91,36 @@ function parseContent(raw) {
     if (typeM) { meta.type = typeM[1]; continue; }
     const projM = line.match(/^project:\s*(\S+)/);
     if (projM) { meta.project = projM[1]; continue; }
+    const pkM = line.match(/^pattern-key:\s*(\S+)/);
+    if (pkM) { meta.patternKey = pkM[1]; continue; }
+    // Non-empty line that isn't a known YAML key → potential body content
+    if (line.trim() && !line.match(/^\w[\w-]*:/)) extraLines.push(line.trim());
   }
 
   const headingLine = lines.slice(bodyStart).find(l => l.startsWith('##'));
-  const title = headingLine ? headingLine.replace(/^#+\s*/, '').trim() : null;
-  const body = lines.slice(bodyStart + (headingLine ? 1 : 0)).join('\n').trim();
+  const bodyLines = lines.slice(bodyStart + (headingLine ? 1 : 0));
+
+  // Build title in priority order:
+  // 1. ## heading  2. first body text line  3. pattern-key humanized  4. first extra YAML line
+  let title = null;
+  if (headingLine) {
+    title = headingLine.replace(/^#+\s*/, '').trim();
+  } else if (bodyLines.find(l => l.trim())) {
+    title = bodyLines.find(l => l.trim()).trim().slice(0, 80);
+  } else if (meta.patternKey) {
+    // "rgcs.oneeuro_strength_normalization" → "RGCS: OneEuro Strength Normalization"
+    const parts = meta.patternKey.split('.');
+    const proj = parts[0]?.toUpperCase() || '';
+    const desc = (parts[1] || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    title = desc ? `${proj}: ${desc}` : meta.patternKey;
+  } else if (extraLines.length) {
+    title = extraLines[0].slice(0, 80);
+  }
+
+  const body = [
+    ...bodyLines,
+    ...(extraLines.length && !headingLine && bodyLines.length === 0 ? extraLines : [])
+  ].join('\n').trim();
 
   return {
     entities: meta.entities || [],

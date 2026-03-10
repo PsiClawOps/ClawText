@@ -21,6 +21,32 @@ export default function antiPatternRoutes(antiPatternStore, memoryStore) {
   });
 
   /**
+   * GET /api/anti-patterns/check?from=RGCS&to=RageFX
+   * Must be registered BEFORE /:id to avoid route conflict.
+   */
+  router.get('/check', (req, res) => {
+    const { from, to } = req.query;
+    if (!from || !to) {
+      return res.status(400).json({ error: '"from" and "to" are required' });
+    }
+    const result = antiPatternStore.check(from, to);
+    res.json({
+      hasWall: !!result && result.status !== ANTI_PATTERN_STATUS.DISMISSED,
+      type: result?.status ?? null,
+      pattern: result ?? null,
+    });
+  });
+
+  /**
+   * GET /api/anti-patterns/blocked-for/:entity
+   * Must be registered BEFORE /:id to avoid route conflict.
+   */
+  router.get('/blocked-for/:entity', (req, res) => {
+    const blocked = antiPatternStore.getBlockedEntitiesFor(req.params.entity);
+    res.json({ entity: req.params.entity, blocked });
+  });
+
+  /**
    * GET /api/anti-patterns/:id
    */
   router.get('/:id', (req, res) => {
@@ -151,32 +177,6 @@ export default function antiPatternRoutes(antiPatternStore, memoryStore) {
     const deleted = antiPatternStore.delete(req.params.id);
     if (!deleted) return res.status(404).json({ error: 'Not found' });
     res.json({ ok: true });
-  });
-
-  /**
-   * GET /api/anti-patterns/check?from=RGCS&to=RageFX
-   * Quick wall check for RAG layer integration.
-   */
-  router.get('/check', (req, res) => {
-    const { from, to } = req.query;
-    if (!from || !to) {
-      return res.status(400).json({ error: '"from" and "to" are required' });
-    }
-    const result = antiPatternStore.check(from, to);
-    res.json({
-      hasWall: !!result && result.status !== ANTI_PATTERN_STATUS.DISMISSED,
-      type: result?.status ?? null,
-      pattern: result ?? null,
-    });
-  });
-
-  /**
-   * GET /api/anti-patterns/blocked-for/:entity
-   * Get all entities that should NOT co-inject with the given entity.
-   */
-  router.get('/blocked-for/:entity', (req, res) => {
-    const blocked = antiPatternStore.getBlockedEntitiesFor(req.params.entity);
-    res.json({ entity: req.params.entity, blocked });
   });
 
   return router;
