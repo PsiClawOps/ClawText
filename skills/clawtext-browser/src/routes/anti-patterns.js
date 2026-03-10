@@ -36,7 +36,7 @@ export default function antiPatternRoutes(antiPatternStore, memoryStore) {
    * Body: { from, to, reason, partialNote?, tags? }
    */
   router.post('/', (req, res) => {
-    const { from, to, reason, partialNote, tags } = req.body;
+    const { from, to, reason, partialNote, tags, status } = req.body;
 
     if (!from || !to) {
       return res.status(400).json({ error: '"from" and "to" are required' });
@@ -58,6 +58,7 @@ export default function antiPatternRoutes(antiPatternStore, memoryStore) {
       partialNote: partialNote || null,
       agentProposed: false,
       tags: tags || [],
+      initialStatus: status || null,
     });
 
     res.status(201).json(pattern);

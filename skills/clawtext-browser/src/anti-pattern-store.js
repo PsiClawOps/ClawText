@@ -96,18 +96,18 @@ export class AntiPatternStore {
     return match ?? null;
   }
 
-  create({ from, to, reason = '', partialNote = null, agentProposed = false, tags = [] }) {
+  create({ from, to, reason = '', partialNote = null, agentProposed = false, tags = [], initialStatus = null }) {
     const now = new Date().toISOString();
+    let status;
+    if (initialStatus && Object.values(ANTI_PATTERN_STATUS).includes(initialStatus)) {
+      status = initialStatus;
+    } else {
+      status = agentProposed ? ANTI_PATTERN_STATUS.PROPOSED : ANTI_PATTERN_STATUS.CONFIRMED;
+    }
     const pattern = {
       id: `ap_${randomUUID().replace(/-/g, '').slice(0, 12)}`,
-      from,
-      to,
-      status: agentProposed ? ANTI_PATTERN_STATUS.PROPOSED : ANTI_PATTERN_STATUS.CONFIRMED,
-      reason,
-      partialNote,
-      agentProposed,
-      createdAt: now,
-      updatedAt: now,
+      from, to, status, reason, partialNote, agentProposed,
+      createdAt: now, updatedAt: now,
       confirmedBy: agentProposed ? null : 'user',
       tags,
     };

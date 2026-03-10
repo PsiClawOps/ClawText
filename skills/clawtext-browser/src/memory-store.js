@@ -1,22 +1,117 @@
 /**
- * Memory data layer — loads clusters + daily YAML files and serves them to the API.
- * Watches the memory directory for changes and hot-reloads.
+ * memory-store.js
+ *
+ * Loads ClawText cluster JSON files and serves them to the API.
+ * Handles the actual on-disk format: { projectId, memories[], builtAt, sourceFiles }
+ * where each memory.content is raw YAML frontmatter text.
  */
 
-import { readFileSync, existsSync } from 'fs';
-import { readdir, readFile } from 'fs/promises';
+import { readFileSync, existsSync, readdirSync } from 'fs';
 import { join, basename } from 'path';
-import { glob } from 'glob';
 import yaml from 'js-yaml';
 import chokidar from 'chokidar';
+
+// Map raw projectIds to display names
+const PROJECT_LABELS = {
+  rgcs:            'RGCS',
+  clawtext:        'ClawText',
+  openclaw:        'OpenClaw',
+  moltmud:         'MoltMUD',
+  ragefx:          'RageFX',
+  'compositor-fx': 'Compositor FX',
+  infrastructure:  'Infrastructure',
+  hardware:        'Hardware',
+  ingestion:       'Ingestion',
+  general:         'General',
+  default:         'General',
+  contractors:     'Contractors',
+  security:        'Security',
+};
+
+function humanize(id) {
+  if (!id) return 'Unknown';
+  if (PROJECT_LABELS[id]) return PROJECT_LABELS[id];
+  // "contractors-showdown-data-platform" → "Contractors Showdown Data Platform"
+  return id.split(/[-_]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+/**
+ * Parse the YAML frontmatter block that lives in memory.content.
+ * Format is like:
+ *   date: 2026-03-03
+ *   project: rgcs
+ *   type: error
+ *   entities: [OneEuro, strength, cutoff]
+ *   keywords: [smoothing, oneeuro]
+ *
+ *   ## Section heading
+ *   Body text here...
+ */
+function parseContent(raw) {
+  if (!raw || typeof raw !== 'string') return { entities: [], keywords: [], date: null, title: null, body: raw || '' };
+
+  // JSON-content memories (ingested Discord messages, docs, etc.)
+  if (raw.trimStart().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(raw);
+      // Skip raw API call logs (Discord read/write action payloads — not user content)
+      if (parsed.action && parsed.handledBy) return { entities: [], keywords: [], date: null, title: null, body: '', _skip: true };
+      const textContent = parsed.content || parsed.message || parsed.text || parsed.body || '';
+      const lines = textContent.split('\n');
+      const heading = lines.find(l => l.startsWith('#'));
+      const firstLine = lines.find(l => l.trim().length > 0);
+      const title = heading ? heading.replace(/^#+\s*/, '').trim() : (firstLine?.trim().slice(0, 80) || null);
+      return {
+        entities: [], keywords: [],
+        date: parsed.timestamp?.slice(0, 10) || null,
+        type: parsed.type || 'ingested',
+        project: null, title,
+        body: textContent.slice(0, 400),
+      };
+    } catch {}
+  }
+
+  const lines = raw.split('\n');
+  const meta = {};
+  let bodyStart = lines.length;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('##')) { bodyStart = i; break; }
+    const entM = line.match(/^entities:\s*\[([^\]]*)\]/);
+    if (entM) { meta.entities = entM[1].split(',').map(s => s.trim()).filter(Boolean); continue; }
+    const kwM = line.match(/^keywords?:\s*\[([^\]]*)\]/);
+    if (kwM) { meta.keywords = kwM[1].split(',').map(s => s.trim()).filter(Boolean); continue; }
+    const dateM = line.match(/^date:\s*(\S+)/);
+    if (dateM) { meta.date = dateM[1]; continue; }
+    const typeM = line.match(/^type:\s*(\S+)/);
+    if (typeM) { meta.type = typeM[1]; continue; }
+    const projM = line.match(/^project:\s*(\S+)/);
+    if (projM) { meta.project = projM[1]; continue; }
+  }
+
+  const headingLine = lines.slice(bodyStart).find(l => l.startsWith('##'));
+  const title = headingLine ? headingLine.replace(/^#+\s*/, '').trim() : null;
+  const body = lines.slice(bodyStart + (headingLine ? 1 : 0)).join('\n').trim();
+
+  return {
+    entities: meta.entities || [],
+    keywords: meta.keywords || [],
+    date:     meta.date || null,
+    type:     meta.type || null,
+    project:  meta.project || null,
+    title,
+    body,
+  };
+}
 
 export class MemoryStore {
   constructor(memoryDir) {
     this.memoryDir = memoryDir;
     this.clustersDir = join(memoryDir, 'clusters');
-    this.clusters = new Map();     // clusterId → {topic, memories[], ...}
-    this.memories = [];            // flat list of all memories (for search)
-    this.entities = new Map();     // entityName → Set<clusterId>
+    this.clusters = new Map();   // clusterId → normalized cluster object
+    this.memories = [];          // flat list for search
+    this.entities = new Map();   // entityName → Set<clusterId>
     this._loadAll();
     this._watch();
   }
@@ -33,24 +128,71 @@ export class MemoryStore {
     if (!existsSync(this.clustersDir)) return;
 
     let files;
-    try {
-      files = require('fs').readdirSync(this.clustersDir).filter(f => f.endsWith('.json'));
-    } catch {
-      return;
-    }
+    try { files = readdirSync(this.clustersDir).filter(f => f.endsWith('.json')); }
+    catch { return; }
 
     for (const file of files) {
       try {
         const raw = readFileSync(join(this.clustersDir, file), 'utf8');
         const cluster = JSON.parse(raw);
-        this.clusters.set(cluster.id || basename(file, '.json'), cluster);
-        if (Array.isArray(cluster.memories)) {
-          for (const mem of cluster.memories) {
-            this.memories.push({ ...mem, clusterId: cluster.id, clusterTopic: cluster.topic });
-          }
-        }
+
+        // Support both our format (projectId) and generic format (id)
+        const id = cluster.projectId || cluster.id || basename(file, '.json');
+        const topic = cluster.topic || humanize(id);
+        const project = id;
+
+        // Aggregate entities + keywords across all memories
+        const allEntities = new Set(cluster.entities || []);
+        const allKeywords = new Set(cluster.keywords || []);
+
+        const processedMemories = (cluster.memories || []).map((mem, idx) => {
+          const parsed = parseContent(mem.content || '');
+          if (parsed._skip) return null;
+
+          parsed.entities.forEach(e => allEntities.add(e));
+          parsed.keywords.forEach(k => allKeywords.add(k));
+          ;(mem.keywords || []).forEach(k => allKeywords.add(k));
+
+          return {
+            _id:          `${id}__${idx}`,
+            clusterId:    id,
+            clusterTopic: topic,
+            project:      parsed.project || mem.project || project,
+            type:         parsed.type || mem.type,
+            date:         parsed.date || mem.updatedAt?.slice(0, 10) || null,
+            title:        parsed.title,
+            content:      parsed.body || parsed.title || mem.content?.slice(0, 300) || '',
+            _searchText:  [
+              parsed.body, parsed.title,
+              parsed.entities.join(' '),
+              parsed.keywords.join(' '),
+              (mem.keywords || []).join(' '),
+              mem.content || '',
+            ].filter(Boolean).join(' ').toLowerCase(),
+            entities:    parsed.entities,
+            keywords:    [...new Set([...parsed.keywords, ...(mem.keywords || [])])],
+            confidence:  mem.confidence || 0,
+            sourceFile:  mem.sourceFile || null,
+            updatedAt:   mem.updatedAt || null,
+          };
+        }).filter(Boolean);
+
+        const normalized = {
+          id,
+          topic,
+          project,
+          entities:    [...allEntities],
+          keywords:    [...allKeywords],
+          memoryCount: processedMemories.length,
+          memories:    processedMemories,
+          builtAt:     cluster.builtAt || null,
+          sourceFiles: cluster.sourceFiles || [],
+        };
+
+        this.clusters.set(id, normalized);
+        this.memories.push(...processedMemories);
       } catch {
-        // skip bad files
+        // skip malformed files
       }
     }
   }
@@ -58,170 +200,140 @@ export class MemoryStore {
   _buildEntityIndex() {
     this.entities.clear();
     for (const [clusterId, cluster] of this.clusters) {
-      const entitySources = [
+      const sources = [
         ...(cluster.entities || []),
         ...(cluster.keywords || []),
         cluster.topic,
+        cluster.project,
       ].filter(Boolean);
 
-      for (const entity of entitySources) {
-        if (!this.entities.has(entity)) this.entities.set(entity, new Set());
-        this.entities.get(entity).add(clusterId);
+      for (const e of sources) {
+        if (!this.entities.has(e)) this.entities.set(e, new Set());
+        this.entities.get(e).add(clusterId);
       }
     }
   }
 
   _watch() {
-    const watcher = chokidar.watch(this.memoryDir, {
+    const watcher = chokidar.watch(this.clustersDir, {
       ignored: /(^|[/\\])\../,
       persistent: false,
-      depth: 2,
+      depth: 1,
     });
     watcher.on('change', () => this._loadAll());
-    watcher.on('add', () => this._loadAll());
+    watcher.on('add',    () => this._loadAll());
+    watcher.on('unlink', () => this._loadAll());
   }
 
-  getClusters() {
-    return Array.from(this.clusters.values());
-  }
+  getClusters() { return Array.from(this.clusters.values()); }
 
-  getClusterById(id) {
-    return this.clusters.get(id) ?? null;
-  }
+  getClusterById(id) { return this.clusters.get(id) ?? null; }
 
-  getAllEntities() {
-    return Array.from(this.entities.keys()).sort();
-  }
+  getAllEntities() { return Array.from(this.entities.keys()).sort(); }
 
   /**
-   * BM25-style search across flat memory list.
-   * Simple token frequency scoring — good enough without a vector DB.
+   * BM25-ish search across all memories.
    */
   search(query, { limit = 20, projectFilter = null } = {}) {
     const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-    if (!tokens.length) return [];
+    if (!tokens.length) return this.memories.slice(0, limit);
 
     const scored = this.memories.map(mem => {
-      const text = [
-        mem.content || '',
-        mem.title || '',
-        mem.keywords?.join(' ') || '',
-        mem.entities?.join(' ') || '',
-        mem.project || '',
-        mem.clusterTopic || '',
-      ].join(' ').toLowerCase();
-
       let score = 0;
       for (const token of tokens) {
-        const count = (text.match(new RegExp(token, 'g')) || []).length;
-        score += count * (token.length > 4 ? 2 : 1); // weight longer tokens more
+        const count = (mem._searchText.match(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+        score += count * (token.length > 4 ? 2 : 1);
+        // Title/entity match bonus
+        if (mem.title?.toLowerCase().includes(token)) score += 5;
+        if (mem.entities?.some(e => e.toLowerCase().includes(token))) score += 3;
       }
-
       return { ...mem, _score: score };
     });
 
-    let results = scored
-      .filter(m => m._score > 0)
-      .sort((a, b) => b._score - a._score)
-      .slice(0, limit);
+    let results = scored.filter(m => m._score > 0).sort((a, b) => b._score - a._score);
 
-    if (projectFilter) {
-      results = results.filter(m => m.project === projectFilter);
-    }
+    if (projectFilter) results = results.filter(m => m.project === projectFilter);
 
-    return results;
+    return results.slice(0, limit);
   }
 
   /**
-   * Build a relationship graph: nodes (clusters) + edges (semantic overlap).
-   * Edge weight = number of shared keywords/entities between clusters.
-   * Anti-patterns get flagged as negative edges.
+   * Graph: cluster nodes + edges (shared keywords = positive, anti-patterns = negative).
    */
-  buildGraph(antiPatterns) {
+  buildGraph(antiPatternStore) {
     const nodes = [];
     const edges = [];
 
     for (const [id, cluster] of this.clusters) {
       nodes.push({
         id,
-        label: cluster.topic || id,
+        label: cluster.topic,
         project: cluster.project,
-        memoryCount: cluster.memories?.length ?? 0,
-        keywords: cluster.keywords || [],
-        entities: cluster.entities || [],
+        memoryCount: cluster.memoryCount,
+        keywords: cluster.keywords.slice(0, 10),
+        entities: cluster.entities.slice(0, 10),
       });
     }
 
-    // Build positive edges from shared entities/keywords
+    // Positive edges: shared keywords between clusters
     const clusterList = Array.from(this.clusters.entries());
     for (let i = 0; i < clusterList.length; i++) {
       for (let j = i + 1; j < clusterList.length; j++) {
-        const [idA, clusterA] = clusterList[i];
-        const [idB, clusterB] = clusterList[j];
+        const [idA, cA] = clusterList[i];
+        const [idB, cB] = clusterList[j];
 
-        const setA = new Set([...(clusterA.entities || []), ...(clusterA.keywords || [])]);
-        const setB = new Set([...(clusterB.entities || []), ...(clusterB.keywords || [])]);
-        const shared = [...setA].filter(x => setB.has(x));
+        const setA = new Set([...(cA.entities || []), ...(cA.keywords || [])].map(s => s.toLowerCase()));
+        const setB = new Set([...(cB.entities || []), ...(cB.keywords || [])].map(s => s.toLowerCase()));
+        const shared = [...setA].filter(x => x.length > 2 && setB.has(x));
 
-        if (shared.length > 0) {
-          edges.push({
-            id: `${idA}__${idB}`,
-            source: idA,
-            target: idB,
-            weight: shared.length,
-            shared,
-            type: 'positive',
-          });
+        if (shared.length >= 2) {
+          edges.push({ id: `${idA}__${idB}`, source: idA, target: idB, weight: shared.length, shared: shared.slice(0, 5), type: 'positive' });
         }
       }
     }
 
-    // Flag anti-pattern edges
-    const allPatterns = antiPatterns.getAll({ status: undefined });
+    // Anti-pattern edges: override or supplement positive edges
+    const allPatterns = antiPatternStore.getAll();
     for (const ap of allPatterns) {
       if (ap.status === 'dismissed') continue;
+      const srcCluster = this._findClusterByEntity(ap.from);
+      const tgtCluster = this._findClusterByEntity(ap.to);
+      if (!srcCluster || !tgtCluster) continue;
 
-      // Try to find matching cluster IDs by entity/topic name
-      const sourceCluster = this._findClusterByEntity(ap.from);
-      const targetCluster = this._findClusterByEntity(ap.to);
+      const existingIdx = edges.findIndex(e =>
+        (e.source === srcCluster && e.target === tgtCluster) ||
+        (e.source === tgtCluster && e.target === srcCluster)
+      );
 
-      if (sourceCluster && targetCluster) {
-        // Remove or replace positive edge with anti-pattern edge
-        const existingIdx = edges.findIndex(
-          e => (e.source === sourceCluster && e.target === targetCluster) ||
-               (e.source === targetCluster && e.target === sourceCluster)
-        );
+      const antiEdge = {
+        id: `ap__${ap.id}`,
+        source: srcCluster,
+        target: tgtCluster,
+        weight: 1,
+        type: ap.status === 'partial' ? 'partial' : 'negative',
+        antiPatternId: ap.id,
+        reason: ap.reason,
+        partialNote: ap.partialNote,
+        shared: [],
+      };
 
-        const antiEdge = {
-          id: `ap__${ap.id}`,
-          source: sourceCluster,
-          target: targetCluster,
-          weight: 1,
-          type: ap.status === 'partial' ? 'partial' : 'negative',
-          antiPatternId: ap.id,
-          reason: ap.reason,
-          partialNote: ap.partialNote,
-        };
-
-        if (existingIdx >= 0) {
-          edges[existingIdx] = antiEdge;
-        } else {
-          edges.push(antiEdge);
-        }
-      }
+      if (existingIdx >= 0) edges[existingIdx] = antiEdge;
+      else edges.push(antiEdge);
     }
 
     return { nodes, edges };
   }
 
-  _findClusterByEntity(entityName) {
-    // Exact match on cluster topic
-    for (const [id, cluster] of this.clusters) {
-      if (cluster.topic?.toLowerCase() === entityName.toLowerCase()) return id;
+  _findClusterByEntity(name) {
+    if (!name) return null;
+    const lower = name.toLowerCase();
+    // Exact topic match
+    for (const [id, c] of this.clusters) {
+      if (c.topic?.toLowerCase() === lower || c.project?.toLowerCase() === lower) return id;
     }
-    // Fuzzy match via entity index
+    // Entity index match
     for (const [entity, clusterIds] of this.entities) {
-      if (entity.toLowerCase().includes(entityName.toLowerCase())) {
+      if (entity.toLowerCase().includes(lower) || lower.includes(entity.toLowerCase())) {
         return clusterIds.values().next().value;
       }
     }
@@ -231,8 +343,8 @@ export class MemoryStore {
   getStats() {
     return {
       clusterCount: this.clusters.size,
-      memoryCount: this.memories.length,
-      entityCount: this.entities.size,
+      memoryCount:  this.memories.length,
+      entityCount:  this.entities.size,
     };
   }
 }
