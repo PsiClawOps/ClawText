@@ -104,10 +104,71 @@ function parseFrontmatter(block) {
   return fm;
 }
 
+/**
+ * Returns true if content is noise that should never enter clusters:
+ *   - Raw JSON blobs (Discord API responses, tool call results)
+ *   - Stack traces / exception dumps
+ *   - Content that is >65% non-prose lines (shell output, diffs, log dumps)
+ *   - Enormous unstructured blocks with no headings
+ */
+/**
+ * Returns true if content is noise that should never enter clusters:
+ *   - Raw JSON blobs that aren't {"content":"..."} doc envelopes
+ *   - Stack traces / exception dumps
+ *   - Content that is >65% non-prose lines (shell output, log dumps)
+ *   - Enormous unstructured blocks with no headings
+ */
+function isNoise(body) {
+  const trimmed = body.trim();
+
+  // Raw JSON object — but NOT a {"content":"..."} doc envelope (those get unwrapped)
+  if (trimmed.startsWith('{') && trimmed.length > 200) {
+    try {
+      const obj = JSON.parse(trimmed);
+      if (typeof obj.content === 'string') return false; // unwrappable — not noise
+    } catch {}
+    return true; // malformed or non-envelope JSON blob
+  }
+
+  // Raw JSON array
+  if (trimmed.startsWith('[') && trimmed.length > 200) return true;
+
+  // Stack trace (3+ "at X (file:line)" lines)
+  const stackLines = (trimmed.match(/^\s+at\s+\S+\s+\(/gm) || []).length;
+  if (stackLines >= 3) return true;
+
+  // Shell/log output: >65% of non-empty lines start with non-word chars
+  const lines = trimmed.split('\n').filter(l => l.trim().length > 0);
+  if (lines.length >= 8) {
+    const noisyLines = lines.filter(l =>
+      /^[\s│├─└●·$>|#\d]/.test(l.trim()) ||
+      /^={3,}|^-{3,}/.test(l.trim())
+    ).length;
+    if (noisyLines / lines.length > 0.65) return true;
+  }
+
+  // Huge unstructured blob with no YAML or markdown structure
+  if (trimmed.length > 6000 && !trimmed.includes('##') && !trimmed.includes('---\n')) return true;
+
+  return false;
+}
+
+/**
+ * If content is a {"content":"..."} JSON envelope (from Discord ingest),
+ * unwrap and return the inner string. Otherwise return as-is.
+ */
+function unwrapEnvelope(body) {
+  const trimmed = body.trim();
+  if (!trimmed.startsWith('{')) return body;
+  try {
+    const obj = JSON.parse(trimmed);
+    if (typeof obj.content === 'string' && obj.content.length > 10) return obj.content;
+  } catch {}
+  return body;
+}
+
 function splitIntoChunks(content, sourceFile) {
   const chunks = [];
-  const fmBlockRe = /^---\n([\s\S]*?)\n---\n([\s\S]*?)(?=^---|\Z)/gm;
-  const h2Re = /^## (.+)$/gm;
 
   // Try YAML-frontmatter style blocks first (our extracted memories format)
   let hasFm = false;
@@ -116,8 +177,9 @@ function splitIntoChunks(content, sourceFile) {
   const fullFmRe = /---\n([\s\S]*?)\n---\n\n([\s\S]*?)(?=\n---\n|\n## |\n### |$)/g;
   while ((match = fullFmRe.exec(content)) !== null) {
     const fm = parseFrontmatter(match[1]);
-    const body = match[2].trim();
-    if (body.length > 20) {
+    const rawBody = match[2].trim();
+    const body = unwrapEnvelope(rawBody); // unwrap {"content":"..."} envelopes
+    if (body.length > 20 && !isNoise(body)) {
       fmMatches.push({ fm, body });
       hasFm = true;
     }
@@ -128,7 +190,7 @@ function splitIntoChunks(content, sourceFile) {
       const keywords = fm.keywords || topKeywords(body);
       const project = fm.project || detectProject(body, Array.isArray(keywords) ? keywords : []);
       const type = detectType(fm, body);
-      const confidence = 0.8; // explicitly authored memories are high confidence
+      const confidence = 0.8;
       chunks.push({ content: body, keywords: Array.isArray(keywords) ? keywords : [keywords], project, type, confidence, sourceFile });
     });
     return chunks;
@@ -141,7 +203,8 @@ function splitIntoChunks(content, sourceFile) {
     const heading = lines[0].trim();
     const body = lines.slice(1).join('\n').trim();
     if (body.length < 30) return;
-    const full = heading + ' ' + body;
+    const full = heading + '\n\n' + body;
+    if (isNoise(full)) return;
     const keywords = topKeywords(full);
     const project = detectProject(full, keywords);
     const type = detectType({}, full);
