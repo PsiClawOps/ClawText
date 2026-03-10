@@ -10,7 +10,49 @@ const BUFFER_FILE = path.join(os.homedir(), '.openclaw/workspace/memory/extract-
  * Appends every message (in/out) to a buffer file.
  * A periodic cron job processes the buffer with an LLM to extract memories.
  * This handler must stay fast — no LLM calls, no blocking I/O waits.
+ *
+ * Tagging:
+ *   _raw_log: true  — content looks like a log dump, stack trace, or JSON blob.
+ *                     The extraction cron will skip these for cluster promotion.
+ *   _hygiene: true  — content contained sensitive patterns (future: sanitize first).
  */
+
+/**
+ * Heuristic: is this content a raw log/tool output/JSON blob rather than prose?
+ * If yes, tag it — the extraction cron will not promote it to clusters.
+ */
+function isRawLog(content) {
+  const trimmed = content.trim();
+
+  // Raw JSON object or array
+  if ((trimmed.startsWith('{') || trimmed.startsWith('[')) && trimmed.length > 100) return true;
+
+  // Stack trace (3+ "at X (file:line)" lines)
+  const stackLines = (trimmed.match(/^\s+at\s+\S+.*\(/gm) || []).length;
+  if (stackLines >= 3) return true;
+
+  // Shell/CLI output: >60% of non-empty lines start with box-drawing, prompt
+  // chars, or numeric prefixes — typical of pasted terminal output
+  const lines = trimmed.split('\n').filter(l => l.trim().length > 0);
+  if (lines.length >= 6) {
+    const noisyLines = lines.filter(l =>
+      /^[\s│├─└●·$>|✓✗✔✘]/.test(l.trim()) ||   // box chars, prompts, bullets
+      /^\s*\d+[.:]\s/.test(l) ||                  // numbered lists from tool output
+      /^={3,}|^-{3,}|^\*{3,}/.test(l.trim())      // divider lines
+    ).length;
+    if (noisyLines / lines.length > 0.60) return true;
+  }
+
+  // Code fence blocks that are very large (pasted file contents / logs)
+  const codeFenceMatch = trimmed.match(/```[\s\S]*?```/g);
+  if (codeFenceMatch) {
+    const totalCodeLen = codeFenceMatch.reduce((s, b) => s + b.length, 0);
+    if (totalCodeLen > 2000) return true;
+  }
+
+  return false;
+}
+
 const handler = async (event) => {
   // Only care about message events
   if (event.type !== 'message') return;
@@ -26,8 +68,10 @@ const handler = async (event) => {
     if (!content || content.length < 10) return;
 
     // Skip bot system noise
-    const from = ctx.from || ctx.to || 'unknown';
     if (content.startsWith('HEARTBEAT_OK') || content.startsWith('NO_REPLY')) return;
+
+    const from = ctx.from || ctx.to || 'unknown';
+    const rawLog = isRawLog(content);
 
     const record = {
       ts: Date.now(),
@@ -36,6 +80,8 @@ const handler = async (event) => {
       channel: ctx.channelId || 'unknown',
       conversationId: ctx.conversationId || ctx.groupId || null,
       content: content.slice(0, 4000), // cap very long messages
+      // Tag raw logs so extraction cron skips cluster promotion
+      ...(rawLog ? { _raw_log: true } : {}),
     };
 
     // Append to buffer (fire-and-forget, no await to stay fast)
