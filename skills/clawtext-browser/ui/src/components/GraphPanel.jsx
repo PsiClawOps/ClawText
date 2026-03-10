@@ -54,6 +54,7 @@ export default function GraphPanel({ api, onSelectCluster, selectedCluster, onNa
   // drag state
   const dragNodeRef = useRef(null);
   const dragMovedRef = useRef(false);
+  const shouldAutoFitRef = useRef(true);
 
   // Resize observer
   useEffect(() => {
@@ -69,7 +70,11 @@ export default function GraphPanel({ api, onSelectCluster, selectedCluster, onNa
   useEffect(() => {
     fetch(`${api}/api/graph`)
       .then(r => r.json())
-      .then(data => { setGraphData(data); setLoading(false); })
+      .then(data => {
+        shouldAutoFitRef.current = true;
+        setGraphData(data);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, [api]);
 
@@ -154,10 +159,28 @@ export default function GraphPanel({ api, onSelectCluster, selectedCluster, onNa
       for (const n of d3Nodes) nodeMapRef.current[n.id] = n;
     });
 
+    sim.on('end', () => {
+      if (shouldAutoFitRef.current) {
+        shouldAutoFitRef.current = false;
+        // next frame so final nodeMap updates are applied
+        requestAnimationFrame(() => fitToViewport(72));
+      }
+    });
+
+    // If the graph is already mostly settled, still auto-fit shortly after start
+    if (shouldAutoFitRef.current) {
+      setTimeout(() => {
+        if (shouldAutoFitRef.current) {
+          shouldAutoFitRef.current = false;
+          fitToViewport(72);
+        }
+      }, 900);
+    }
+
     simRef.current = sim;
 
     return () => sim.stop();
-  }, [graphData, dims]);
+  }, [graphData, dims, fitToViewport]);
 
   // Wheel zoom
   const handleWheel = useCallback((e) => {
@@ -244,18 +267,45 @@ export default function GraphPanel({ api, onSelectCluster, selectedCluster, onNa
     } catch {}
   }, [api, onSelectCluster]);
 
+  const fitToViewport = useCallback((padding = 70) => {
+    const vals = Object.values(nodeMapRef.current || {}).filter(n => Number.isFinite(n.x) && Number.isFinite(n.y));
+    if (!vals.length || !dims.width || !dims.height) return;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const n of vals) {
+      const r = nodeRadius(n.memoryCount);
+      minX = Math.min(minX, n.x - r);
+      maxX = Math.max(maxX, n.x + r);
+      minY = Math.min(minY, n.y - r);
+      maxY = Math.max(maxY, n.y + r);
+    }
+
+    const graphW = Math.max(1, maxX - minX);
+    const graphH = Math.max(1, maxY - minY);
+    const availW = Math.max(1, dims.width - padding * 2);
+    const availH = Math.max(1, dims.height - padding * 2);
+
+    const k = Math.max(0.35, Math.min(2.8, Math.min(availW / graphW, availH / graphH)));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const x = dims.width / 2 - cx * k;
+    const y = dims.height / 2 - cy * k;
+
+    vtRef.current = { x, y, k };
+    setViewTransform({ x, y, k });
+  }, [dims]);
+
   const handleRelayout = useCallback(() => {
     // Scatter nodes and reheat
     const { width, height } = dims;
     for (const n of Object.values(nodeMapRef.current)) {
-      n.x = width / 2 + (Math.random() - 0.5) * width * 0.6;
-      n.y = height / 2 + (Math.random() - 0.5) * height * 0.6;
+      n.x = width / 2 + (Math.random() - 0.5) * width * 0.78;
+      n.y = height / 2 + (Math.random() - 0.5) * height * 0.78;
       n.vx = 0; n.vy = 0;
       n.fx = null; n.fy = null;
     }
+    shouldAutoFitRef.current = true;
     if (simRef.current) simRef.current.alpha(1).restart();
-    vtRef.current = { x: 0, y: 0, k: 1 };
-    setViewTransform({ x: 0, y: 0, k: 1 });
   }, [dims]);
 
   const zoomBy = useCallback((factor) => {
@@ -383,6 +433,7 @@ export default function GraphPanel({ api, onSelectCluster, selectedCluster, onNa
         {/* Controls */}
         <div style={s.controls}>
           <button onClick={handleRelayout} style={s.btn} title="Scatter and re-settle">⟳ Re-layout</button>
+          <button onClick={() => fitToViewport(72)} style={s.btn} title="Fit graph to viewport">⤢ Fit</button>
           <div style={s.divider} />
           <button onClick={() => zoomBy(1.3)} style={s.btn}>＋</button>
           <button onClick={() => zoomBy(0.77)} style={s.btn}>－</button>
