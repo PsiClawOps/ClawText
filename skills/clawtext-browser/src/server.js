@@ -11,10 +11,12 @@ import { existsSync } from 'fs';
 import { MemoryStore } from './memory-store.js';
 import { AntiPatternStore } from './anti-pattern-store.js';
 import { getStats as getLearningsStats } from './learnings-store.js';
+import { getStats as getHygieneStats } from './hygiene-store.js';
 import searchRoutes from './routes/search.js';
 import antiPatternRoutes from './routes/anti-patterns.js';
 import graphRoutes from './routes/graph.js';
 import learningsRoutes from './routes/learnings.js';
+import hygieneRoutes from './routes/hygiene.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -40,6 +42,8 @@ export function createServer(options = {}) {
   app.use('/api/anti-patterns', antiPatternRoutes(antiPatternStore, memoryStore));
   app.use('/api/graph', graphRoutes(memoryStore, antiPatternStore));
   app.use('/api/learnings', learningsRoutes);
+  app.use('/api/hygiene', hygieneRoutes);
+  app.set('memoryStore', memoryStore);
 
   // Health + stats
   app.get('/api/health', (req, res) => {
@@ -48,7 +52,8 @@ export function createServer(options = {}) {
       memoryDir,
       stats: memoryStore.getStats(),
       antiPatterns: antiPatternStore.getAll().length,
-      learnings: getLearningsStats()
+      learnings: getLearningsStats(),
+      hygiene: getHygieneStats(),
     });
   });
 

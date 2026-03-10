@@ -3,6 +3,7 @@ import SearchPanel from './components/SearchPanel.jsx';
 import GraphPanel from './components/GraphPanel.jsx';
 import AntiPatternPanel from './components/AntiPatternPanel.jsx';
 import LearningsPanel from './components/LearningsPanel.jsx';
+import HygienePanel from './components/HygienePanel.jsx';
 import StatusBar from './components/StatusBar.jsx';
 
 const TABS = [
@@ -10,6 +11,7 @@ const TABS = [
   { id: 'graph',     label: '🕸 Graph',     icon: '🕸' },
   { id: 'walls',     label: '🧱 Walls',     icon: '🧱' },
   { id: 'learnings', label: '🧠 Learnings', icon: '🧠' },
+  { id: 'hygiene',   label: '🧹 Hygiene',   icon: '🧹' },
 ];
 
 const API = 'http://localhost:3737';
@@ -73,9 +75,10 @@ export default function App() {
           />
         )}
         {activeTab === 'learnings' && (
-          <LearningsPanel
-            api={API}
-          />
+          <LearningsPanel api={API} />
+        )}
+        {activeTab === 'hygiene' && (
+          <HygienePanel api={API} />
         )}
       </main>
     </div>
