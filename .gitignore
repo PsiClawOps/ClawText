@@ -25,6 +25,7 @@ logs/
 # Runtime / state
 .tmp
 .openclaw/workspace-state.json
+memory/
 memory/extract-buffer.jsonl
 memory/extract-state.json
 

@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  */
 export class ClawTextRAG {
   constructor(workspacePath = process.env.HOME + '/.openclaw/workspace') {
+    this.workspacePath = workspacePath;
     this.clustersDir = path.join(workspacePath, 'memory', 'clusters');
     this.clusters = new Map();
     this.config = {
@@ -388,7 +389,7 @@ export class ClawTextRAG {
 
     // Append metrics log for evaluation
     try{
-      const statsDir = path.join(__dirname, '..', 'memory');
+      const statsDir = path.join(this.workspacePath, 'state', 'clawtext', 'dev');
       if (!fs.existsSync(statsDir)) fs.mkdirSync(statsDir, { recursive: true });
       const logPath = path.join(statsDir, 'mem0-eval.jsonl');
       const entry = {
