@@ -262,20 +262,8 @@ Advanced topics and design decisions:
 
 ### Companion Tools
 - **[docs/MULTI_AGENT.md](./docs/MULTI_AGENT.md)** — Multi-agent coordination via memory
-- **[skills/clawbridge/START_HERE.md](./skills/clawbridge/START_HERE.md)** — Thread handoff tool
+- **[ClawBridge](https://github.com/ragesaq/clawbridge)** — Thread handoff and continuity transfer (separate repo)
 - **[docs/RESEARCH.md](./docs/RESEARCH.md)** — Background research and prior art
-
----
-
-## Optional Operator UI
-
-ClawText includes a browser-based operator dashboard (in `skills/clawtext-browser/`) for:
-
-- **Search** — Find memories with semantic search and filters
-- **Graph inspection** — Visualize cluster relationships and anti-pattern walls
-- **Curation** — Mark memories as durable/stale/archive/promote
-- **Health monitoring** — View extraction state, quality metrics, ingestion status
-- **Audit trail** — Full append-only log of memory changes
 
 ---
 
@@ -296,6 +284,7 @@ ClawText includes a browser-based operator dashboard (in `skills/clawtext-browse
 - A replacement for human review on risky changes
 - A license to ingest arbitrary untrusted content without controls
 - Self-improving code (v1 focuses on guidance capture, not auto-rewrite)
+- A browser-based UI (currently file + CLI based; operator UI planned as future work)
 
 ---
 
