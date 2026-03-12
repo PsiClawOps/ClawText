@@ -33,6 +33,9 @@ export class ClawTextRAG {
     minConfidence: number;
     injectMode: 'smart' | 'full' | 'snippets' | 'off';
     tokenBudget: number;
+    contextLibrarianEnabled: boolean;
+    contextLibrarianMaxSelect: number;
+    contextLibrarianAlwaysIncludeRecent: number;
   };
 
   constructor(workspacePath: string = process.env.HOME + '/.openclaw/workspace') {
@@ -43,6 +46,9 @@ export class ClawTextRAG {
       minConfidence: 0.6,
       injectMode: 'smart',
       tokenBudget: 4000,
+      contextLibrarianEnabled: process.env.CLAWTEXT_CONTEXT_LIBRARIAN_ENABLED === 'true',
+      contextLibrarianMaxSelect: 4,
+      contextLibrarianAlwaysIncludeRecent: 1,
     };
 
     this.loadClusters();
@@ -134,6 +140,42 @@ export class ClawTextRAG {
   }
 
   /**
+   * Build compact summaries and select a minimal memory set before hydration.
+   * Inspired by select-then-hydrate curation, but additive and default-off.
+   */
+  private curateMemoriesWithLibrarian(memories: Memory[], query: string): Memory[] {
+    if (!this.config.contextLibrarianEnabled || memories.length <= 2) return memories;
+
+    const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+    const scored = memories.map((m, id) => {
+      const summary = `${(m.type || 'fact')} ${(m.content || '').split('\n')[0]} ${(m.keywords || []).join(' ')}`.toLowerCase();
+      let score = 0;
+      for (const t of terms) {
+        if (summary.includes(t)) score += 1;
+      }
+      score += (m.confidence || 0) * 0.5;
+      if (m.type === 'decision' || m.type === 'context') score += 0.35;
+      return { id, memory: m, score };
+    });
+
+    const sortedByScore = [...scored].sort((a, b) => b.score - a.score);
+    const selected = sortedByScore.slice(0, this.config.contextLibrarianMaxSelect).map(s => s.id);
+
+    // Always include most recent N memories for coherence
+    const recency = [...scored]
+      .sort((a, b) => {
+        const ta = new Date(a.memory.updatedAt || 0).getTime();
+        const tb = new Date(b.memory.updatedAt || 0).getTime();
+        return tb - ta;
+      })
+      .slice(0, this.config.contextLibrarianAlwaysIncludeRecent)
+      .map(s => s.id);
+
+    const keep = new Set([...selected, ...recency]);
+    return memories.filter((_, idx) => keep.has(idx));
+  }
+
+  /**
    * Format memories for injection into prompt
    */
   formatMemories(memories: Memory[]): string {
@@ -196,7 +238,8 @@ export class ClawTextRAG {
       return { prompt: systemPrompt, injected: 0, tokens: 0 };
     }
 
-    const formatted = this.formatMemories(memories);
+    const curated = this.curateMemoriesWithLibrarian(memories, query);
+    const formatted = this.formatMemories(curated);
     const injectedTokens = this.estimateTokens(formatted);
 
     // Respect token budget
@@ -219,7 +262,7 @@ export class ClawTextRAG {
 
     return {
       prompt: injectedPrompt,
-      injected: memories.length,
+      injected: curated.length,
       tokens: injectedTokens,
     };
   }

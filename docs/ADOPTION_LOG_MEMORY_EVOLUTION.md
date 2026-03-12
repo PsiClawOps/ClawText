@@ -62,3 +62,19 @@ Use this log to leave durable breadcrumbs for memory-engine evolution work.
 - **References:**
   - `docs/ME-002_SCOPE_ISOLATION_HARDENING.md`
   - `src/operational-retrieval.ts`
+
+## 2026-03-12 — ME-003 Context Librarian Curation
+
+- **Change ID:** ME-003
+- **Date (UTC):** 2026-03-12
+- **Feature:** Optional select-then-hydrate curation over retrieved memories
+- **Status:** merged (flagged)
+- **Flag:** `CLAWTEXT_CONTEXT_LIBRARIAN_ENABLED`
+- **Default State:** off
+- **Reason:** Improve signal-to-noise in injected context using lightweight curation with recency floor.
+- **Impact on Other Pillars:** No ClawDash/ClawTask/continuity runtime impact; injection-path curation only when flag enabled.
+- **Rollback:** Disable feature flag; or revert ME-003 changes in `src/rag.ts` and `src/rag.js`.
+- **References:**
+  - `docs/ME-003_CONTEXT_LIBRARIAN_CURATION.md`
+  - `src/rag.ts`
+  - `src/rag.js`

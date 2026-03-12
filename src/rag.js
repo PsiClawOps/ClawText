@@ -21,7 +21,11 @@ export class ClawTextRAG {
       // Hybrid RRF merge params
       bm25Weight: 1.0,
       mem0Weight: 1.0,
-      rrfK: 60
+      rrfK: 60,
+      // Optional context curation mode (default OFF)
+      contextLibrarianEnabled: process.env.CLAWTEXT_CONTEXT_LIBRARIAN_ENABLED === 'true',
+      contextLibrarianMaxSelect: 4,
+      contextLibrarianAlwaysIncludeRecent: 1
     };
 
     this.loadClusters();
@@ -260,6 +264,44 @@ export class ClawTextRAG {
     });
   }
 
+  // Optional select-then-hydrate curation on top of retrieval results.
+  // Additive and default-off to avoid behavior drift.
+  curateMemoriesWithLibrarian(memories, query) {
+    if (!this.config.contextLibrarianEnabled || memories.length <= 2) return memories;
+
+    const terms = (query || '').toLowerCase().split(/\s+/).filter(t => t.length > 2);
+    const scored = memories.map((m, id) => {
+      const summary = `${m.type || 'fact'} ${(m.content || '').split('\n')[0]} ${(m.keywords || []).join(' ')}`.toLowerCase();
+      let score = 0;
+      for (const t of terms) {
+        if (summary.includes(t)) score += 1;
+      }
+      score += (m.confidence || 0) * 0.5;
+      if (m.type === 'decision' || m.type === 'context') score += 0.35;
+      if (m._mergedScore) score += Math.min(0.5, m._mergedScore);
+      return { id, memory: m, score };
+    });
+
+    const selected = scored
+      .slice()
+      .sort((a, b) => b.score - a.score)
+      .slice(0, this.config.contextLibrarianMaxSelect)
+      .map(s => s.id);
+
+    const recency = scored
+      .slice()
+      .sort((a, b) => {
+        const ta = new Date(a.memory.updatedAt || a.memory.lastSeenAt || 0).getTime();
+        const tb = new Date(b.memory.updatedAt || b.memory.lastSeenAt || 0).getTime();
+        return tb - ta;
+      })
+      .slice(0, this.config.contextLibrarianAlwaysIncludeRecent)
+      .map(s => s.id);
+
+    const keep = new Set([...selected, ...recency]);
+    return memories.filter((_, idx) => keep.has(idx));
+  }
+
   formatMemories(memories) {
     if (memories.length === 0) return '';
 
@@ -318,7 +360,8 @@ export class ClawTextRAG {
       return { prompt: systemPrompt, injected: 0, tokens: 0 };
     }
 
-    const formatted = this.formatMemories(memories);
+    const curated = this.curateMemoriesWithLibrarian(memories, query);
+    const formatted = this.formatMemories(curated);
     const injectedTokens = this.estimateTokens(formatted);
 
     if (injectedTokens > this.config.tokenBudget) {
@@ -330,7 +373,7 @@ export class ClawTextRAG {
     if (this.config.injectMode === 'smart' || this.config.injectMode === 'full') {
       injectedPrompt = systemPrompt + formatted;
     } else if (this.config.injectMode === 'snippets') {
-      const snippets = memories
+      const snippets = curated
         .map(m => `- [${m.type}] ${m.content.split('\n')[0].substring(0, 100)}...`)
         .join('\n');
       injectedPrompt = systemPrompt + '\n## Context Snippets\n' + snippets + '\n';
@@ -338,9 +381,9 @@ export class ClawTextRAG {
 
     const result = {
       prompt: injectedPrompt,
-      injected: memories.length,
+      injected: curated.length,
       tokens: injectedTokens,
-      memories: memories
+      memories: curated
     };
 
     // Append metrics log for evaluation
@@ -354,7 +397,7 @@ export class ClawTextRAG {
         projectKeywords,
         injected: result.injected,
         tokens: result.tokens,
-        memories: memories.map(m=>({ key: m.key || null, _source: m._source || null, _mergedScore: m._mergedScore || null }))
+        memories: curated.map(m=>({ key: m.key || null, _source: m._source || null, _mergedScore: m._mergedScore || null }))
       };
       fs.appendFileSync(logPath, JSON.stringify(entry) + '\n', 'utf8');
     }catch(e){ console.error('[ClawText RAG] failed to write mem0 eval log', e.message); }
