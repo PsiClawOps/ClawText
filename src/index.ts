@@ -1,3 +1,3 @@
-export { ClawTextRAG as default } from './rag';
-export { ClawTextInjectionPlugin } from './plugin';
-export type { ClawTextRAG } from './rag';
+export { ClawTextInjectionPlugin as default } from './plugin';
+export { ClawTextRAG } from './rag';
+export type { ClawTextInjectionPlugin } from './plugin';
