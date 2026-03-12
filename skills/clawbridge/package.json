@@ -1,0 +1,15 @@
+{
+  "name": "clawbridge",
+  "version": "0.2.0",
+  "description": "OpenClaw skill: structured continuity and transfer for active work",
+  "main": "index.js",
+  "bin": {
+    "clawbridge": "bin/clawbridge.js"
+  },
+  "scripts": {
+    "help": "node bin/clawbridge.js help"
+  },
+  "author": "OpenClaw Assistant",
+  "license": "MIT",
+  "dependencies": {}
+}

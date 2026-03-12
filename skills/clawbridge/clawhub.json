@@ -1,0 +1,9 @@
+{
+  "name": "clawbridge",
+  "title": "ClawBridge",
+  "description": "Continuity + transfer skill for preserving active work across threads/posts/sessions with structured handoff packets and optional ClawText promotion.",
+  "author": "OpenClaw Assistant",
+  "version": "0.2.0",
+  "license": "MIT",
+  "skills": ["clawbridge"]
+}

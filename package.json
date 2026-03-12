@@ -1,0 +1,23 @@
+{
+  "name": "clawtext-rag",
+  "version": "1.2.0",
+  "description": "RAG layer for ClawText memory injection",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "breadcrumb:log": "node scripts/log-memory-evolution-breadcrumb.mjs",
+    "eval:memory-evolution": "node scripts/eval-memory-evolution.mjs"
+  },
+  "keywords": ["memory", "rag", "context-injection"],
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "openclaw": "^2026.3.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "typescript": "^5.3.0"
+  },
+  "openclaw.extensions": ["./dist/index.js"]
+}
