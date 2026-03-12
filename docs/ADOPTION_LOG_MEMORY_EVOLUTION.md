@@ -78,3 +78,18 @@ Use this log to leave durable breadcrumbs for memory-engine evolution work.
   - `docs/ME-003_CONTEXT_LIBRARIAN_CURATION.md`
   - `src/rag.ts`
   - `src/rag.js`
+
+## 2026-03-12 — ME-004 Evaluation Harness
+
+- **Change ID:** ME-004
+- **Date (UTC):** 2026-03-12
+- **Feature:** Baseline vs flagged memory-evolution benchmark harness
+- **Status:** merged
+- **Flag:** N/A (evaluation-only)
+- **Default State:** N/A
+- **Reason:** Provide evidence-driven adoption by quantifying impact before default enablement.
+- **Impact on Other Pillars:** No runtime impact; offline eval tooling only.
+- **Rollback:** Remove `scripts/eval-memory-evolution.mjs` and package script entry.
+- **References:**
+  - `docs/ME-004_EVAL_HARNESS.md`
+  - `scripts/eval-memory-evolution.mjs`

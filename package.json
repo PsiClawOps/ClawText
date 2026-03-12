@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "breadcrumb:log": "node scripts/log-memory-evolution-breadcrumb.mjs"
+    "breadcrumb:log": "node scripts/log-memory-evolution-breadcrumb.mjs",
+    "eval:memory-evolution": "node scripts/eval-memory-evolution.mjs"
   },
   "keywords": ["memory", "rag", "context-injection"],
   "dependencies": {
