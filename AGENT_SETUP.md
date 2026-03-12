@@ -9,22 +9,22 @@ This guide is for **agents installing and configuring ClawText** in an OpenClaw 
 Agent runs:
 
 ```bash
-# Clone the repo
-git clone https://github.com/ragesaq/clawtext.git ~/.openclaw/workspace/skills/clawtext
-cd ~/.openclaw/workspace/skills/clawtext
+# Install via OpenClaw plugin system
+openclaw plugins install @openclaw/clawtext
 
-# Install dependencies
-npm install
-
-# Build TypeScript
-npm run build
-
-# Verify build succeeded
-ls -la dist/index.js && echo "✅ Build successful"
+# Verify installation
+openclaw plugins list | grep clawtext
 ```
 
 **Agent reports to user:**
-> "ClawText is now installed at `~/.openclaw/workspace/skills/clawtext`. The system is ready to configure."
+> "ClawText is now installed and registered as an OpenClaw plugin. You can check the installation with `openclaw plugins list`. Ready to configure."
+
+**What happened automatically:**
+- ✅ Downloaded from npm
+- ✅ Extracted to `~/.openclaw/extensions/clawtext/`
+- ✅ Dependencies installed
+- ✅ Registered in plugin config
+- ✅ Ready to enable
 
 ---
 
@@ -32,57 +32,36 @@ ls -la dist/index.js && echo "✅ Build successful"
 
 Agent edits `~/.openclaw/openclaw.json` and asks key questions:
 
-### Step 2a: Enable the Plugin
+### Step 2a: Configure Memory Behavior
 
-Agent adds ClawText to the plugin config:
-
-```json
-{
-  "plugins": {
-    "load": {
-      "paths": [
-        "~/.openclaw/workspace/skills/clawtext"
-      ]
-    },
-    "allow": ["clawtext"],
-    "entries": {
-      "clawtext": {
-        "enabled": true
-      }
-    }
-  }
-}
-```
-
-**Agent reports:**
-> "Plugin configuration added. Gateway will load ClawText on restart."
-
-### Step 2b: Ask About RAG Injection Tuning
+The plugin is already registered. Agent asks about tuning:
 
 **Agent asks user:**
 
 > "ClawText automatically injects the most relevant memories into your prompts. I can configure three things:
 >
-> 1. **How many memories?** (default: 5, range: 1-10)
+> 1. **How many memories per query?** (default: 5, range: 1-10)
 > 2. **How strict on relevance?** (default: 0.70, range: 0.50-0.85, higher = stricter)
-> 3. **Token budget?** (default: 2000, range: 1000-8000)
+> 3. **Max injection tokens?** (default: 2000, range: 1000-8000)
 >
 > These defaults work for most workflows. Do you want to keep them, or customize?"
 
 **If keep defaults:**
 - Agent adds minimal config:
 ```json
-"entries": {
-  "clawtext": {
-    "enabled": true,
-    "memorySearch": {
-      "sync": { "onSessionStart": true },
-      "maxMemories": 5,
-      "minConfidence": 0.70
-    },
-    "clusters": {
-      "rebuildInterval": "0 2 * * *",
-      "validationThreshold": 0.70
+"plugins": {
+  "entries": {
+    "clawtext": {
+      "enabled": true,
+      "memorySearch": {
+        "sync": { "onSessionStart": true },
+        "maxMemories": 5,
+        "minConfidence": 0.70
+      },
+      "clusters": {
+        "rebuildInterval": "0 2 * * *",
+        "validationThreshold": 0.70
+      }
     }
   }
 }
@@ -93,6 +72,8 @@ Agent adds ClawText to the plugin config:
 **If customize:**
 - Agent asks each question individually and fills in values
 - Agent reports back what was set and why it matters
+
+### Step 2b: Gateway Restart
 
 ---
 
@@ -116,30 +97,25 @@ Waits for success, then reports:
 
 ## Phase 4: Validate Installation (Agent-Assisted)
 
-Agent runs validation tests:
+Agent validates the installation:
 
 ```bash
-cd ~/.openclaw/workspace/skills/clawtext
+# Check plugin loaded
+openclaw plugins list | grep clawtext
 
-# Build clusters
-node scripts/build-clusters.js --force
+# Check gateway status
+openclaw gateway status
 
-# Validate RAG injection quality
-node scripts/validate-rag.js
-
-# Check operational learning status
-node scripts/operational-cli.mjs status
-
-# Show memory extraction stats
-node scripts/operational-cli.mjs report
+# Validate memory system health
+openclaw plugins run clawtext validate-rag
 ```
 
 **Agent reports findings to user:**
 
 If all pass:
 > "✅ All systems green. ClawText is installed and working:
-> - Semantic clusters built and indexed
-> - RAG injection validated (<5ms latency)
+> - Plugin loaded and enabled
+> - RAG injection ready
 > - Memory extraction active
 > - Operational learning pipeline ready"
 
@@ -272,12 +248,12 @@ Agent explains what happens next:
 
 Agent confirms with user:
 
-- [ ] ClawText installed at `~/.openclaw/workspace/skills/clawtext`
-- [ ] Plugin enabled in `openclaw.json`
+- [ ] ClawText installed via `openclaw plugins install @openclaw/clawtext`
+- [ ] Plugin registered in `openclaw.json`
+- [ ] RAG injection tuning configured (memory count, confidence, tokens)
 - [ ] Gateway restarted
 - [ ] All validation tests passed
-- [ ] RAG injection tuning discussed and configured
-- [ ] Cluster rebuild strategy chosen
+- [ ] Cluster rebuild strategy discussed
 - [ ] Initial knowledge ingested (if any)
 - [ ] Setup documented in `memory/clawtext-setup.md`
 - [ ] User understands next steps
@@ -286,20 +262,24 @@ Agent confirms with user:
 
 ## Troubleshooting During Setup
 
+**If plugin fails to install:**
+- Agent verifies `@openclaw/clawtext` is available on npm: `npm view @openclaw/clawtext`
+- Agent checks network connectivity
+- Agent tries again with `openclaw plugins install @openclaw/clawtext --force`
+
 **If plugin fails to load:**
-- Agent checks paths in `openclaw.json`
-- Agent checks `dist/index.js` exists
-- Agent runs `npm run build` again if needed
-- Agent restarts gateway and tries again
+- Agent checks `openclaw plugins list` output
+- Agent checks `~/.openclaw/openclaw.json` for syntax errors
+- Agent restarts gateway: `openclaw gateway restart`
 
 **If RAG injection test fails:**
-- Agent checks clusters were built
-- Agent rebuilds clusters with `--force`
-- Agent checks configuration syntax in `openclaw.json`
+- Agent checks plugin enabled in config
+- Agent checks configuration syntax
 - Agent restarts gateway
+- Agent runs validation again
 
 **If user wants to change settings later:**
-- Agent explains how to edit `openclaw.json`
+- Agent explains how to edit `openclaw.json` entries.clawtext config
 - Agent runs validation after changes
 - Agent restarts gateway
 - No need to reinstall

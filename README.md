@@ -249,49 +249,29 @@ See [SECURITY.md](./SECURITY.md) and [RISK.md](./RISK.md) for detailed threat mo
 
 ## Installation
 
-### Agent-Assisted Setup
-
-You can have agents handle most of the installation and configuration. Here's a sample prompt:
-
-```
-Please help me set up ClawText for this workspace.
-I want to:
-1. Add it to my openclaw.json (plugins.load.paths, plugins.allow, plugins.entries)
-2. Install dependencies
-3. Run a quick health check
-4. Then we can ingest [my project docs / a Discord forum / a code repo]
-
-Assume I'm comfortable with shell commands if needed, but prefer you to handle the details.
-```
-
-Most agents can read `AGENT_SETUP.md` from the repo and handle the setup automatically. Then they can guide you through initial ingest.
-
-See [AGENT_SETUP.md](./AGENT_SETUP.md) for full agent-assisted workflow.
-
-### Manual Installation
-
-If you prefer to do it yourself:
-
-#### Step 1: Clone and Install
+### Quick Start (Recommended)
 
 ```bash
-git clone https://github.com/ragesaq/clawtext.git ~/.openclaw/workspace/skills/clawtext
-cd ~/.openclaw/workspace/skills/clawtext
-npm install
-npm run build
+openclaw plugins install @openclaw/clawtext
 ```
 
-#### Step 2: Activate
+That's it. OpenClaw handles dependency installation, registration, and plugin activation automatically.
 
-Add to your `~/.openclaw/openclaw.json`:
+### What `openclaw plugins install` Does
+
+- ✅ Downloads ClawText from npm
+- ✅ Extracts to `~/.openclaw/extensions/clawtext/`
+- ✅ Runs `npm install --ignore-scripts`
+- ✅ Registers in `plugins.installs` config
+- ✅ Enables the plugin automatically
+
+### Configuration (Optional)
+
+After installation, customize memory behavior in `~/.openclaw/openclaw.json`:
 
 ```json
 {
   "plugins": {
-    "load": {
-      "paths": ["~/.openclaw/workspace/skills/clawtext"]
-    },
-    "allow": ["clawtext"],
     "entries": {
       "clawtext": {
         "enabled": true,
@@ -310,32 +290,76 @@ Add to your `~/.openclaw/openclaw.json`:
 }
 ```
 
-Restart your gateway:
+Then restart:
 
 ```bash
 openclaw gateway restart
 ```
 
-#### Step 3: Verify
+### Verify Installation
 
 ```bash
 # Check plugin loaded
 openclaw plugins list
-# Expected: ClawText | clawtext | loaded
+# Expected: clawtext | enabled | loaded
 
 # Check gateway status
 openclaw gateway status
-# Expected: running + RPC probe ok
+# Expected: running
 
-# Build clusters
-npm run build-clusters.js --force
-
-# Validate retrieval quality
-npm run validate-rag.js
-
-# Check operational learning status
-npm run operational-cli.mjs status
+# Validate memory quality
+openclaw plugins run clawtext validate
 ```
+
+### Updates
+
+Keep ClawText up to date:
+
+```bash
+openclaw plugins update clawtext
+```
+
+Or update all plugins:
+
+```bash
+openclaw plugins update --all
+```
+
+### Development / Local Setup
+
+For development or modification:
+
+```bash
+# Link local copy for development
+openclaw plugins install -l ./path/to/clawtext
+```
+
+Or clone and install manually:
+
+```bash
+git clone https://github.com/ragesaq/clawtext.git
+cd clawtext
+npm install
+npm run build
+openclaw plugins install -l .
+```
+
+### Agent-Assisted Setup
+
+If you prefer guided setup, ask an agent:
+
+```
+Please help me set up ClawText for this workspace.
+I want to:
+1. Install via `openclaw plugins install @openclaw/clawtext`
+2. Configure memory search (maxMemories, thresholds)
+3. Run a quick health check
+4. Then we can ingest [my project docs / a Discord forum / a code repo]
+
+Assume I'm comfortable with shell commands if needed, but prefer you to handle the details.
+```
+
+See [AGENT_SETUP.md](./AGENT_SETUP.md) for full agent-assisted workflow.
 
 ---
 

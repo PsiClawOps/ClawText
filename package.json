@@ -1,16 +1,34 @@
 {
-  "name": "clawtext-rag",
-  "version": "1.2.0",
-  "description": "RAG layer for ClawText memory injection",
+  "name": "@openclaw/clawtext",
+  "version": "1.4.0",
+  "description": "Comprehensive memory platform for OpenClaw agents. Three-lane architecture: working memory (automatic capture + fast injection), knowledge ingest (Discord, repos, docs, JSON), and operational learning (failures → durable guidance).",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ragesaq/clawtext.git"
+  },
+  "homepage": "https://github.com/ragesaq/clawtext",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "breadcrumb:log": "node scripts/log-memory-evolution-breadcrumb.mjs",
     "eval:memory-evolution": "node scripts/eval-memory-evolution.mjs"
   },
-  "keywords": ["memory", "rag", "context-injection"],
+  "keywords": [
+    "memory",
+    "rag",
+    "context-injection",
+    "agent-memory",
+    "semantic-clustering",
+    "operational-learning",
+    "self-healing"
+  ],
+  "author": "ragesaq",
+  "license": "MIT",
   "dependencies": {
     "js-yaml": "^4.1.0",
     "openclaw": "^2026.3.1"
@@ -19,5 +37,8 @@
     "@types/js-yaml": "^4.0.9",
     "typescript": "^5.3.0"
   },
-  "openclaw.extensions": ["./dist/index.js"]
+  "openclaw": {
+    "extensions": ["./dist/index.js"],
+    "skills": ["./docs"]
+  }
 }
