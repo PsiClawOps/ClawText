@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ClawText Memory Evolution Breadcrumb",
+  "type": "object",
+  "required": [
+    "ts",
+    "changeId",
+    "feature",
+    "status",
+    "flag",
+    "impact",
+    "rollback"
+  ],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "changeId": { "type": "string" },
+    "feature": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["proposed", "in-progress", "merged", "rolled-back"]
+    },
+    "flag": { "type": "string" },
+    "defaultState": {
+      "type": "string",
+      "enum": ["on", "off", "n/a"]
+    },
+    "impact": {
+      "type": "object",
+      "properties": {
+        "clawdash": { "type": "string" },
+        "clawtask": { "type": "string" },
+        "continuityTransfer": { "type": "string" },
+        "latency": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "rollback": { "type": "string" },
+    "references": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}

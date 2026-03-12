@@ -159,6 +159,8 @@ You should see cluster files in `memory/clusters/` and a successful validation r
 - [docs/MEMORY_SCHEMA.md](./docs/MEMORY_SCHEMA.md)
 - [docs/HOT_CACHE.md](./docs/HOT_CACHE.md)
 - [docs/TESTING.md](./docs/TESTING.md)
+- [docs/ADOPTION_PLAN_MEMORY_EVOLUTION.md](./docs/ADOPTION_PLAN_MEMORY_EVOLUTION.md)
+- [docs/ADOPTION_LOG_MEMORY_EVOLUTION.md](./docs/ADOPTION_LOG_MEMORY_EVOLUTION.md)
 
 ### Agent/operator docs
 

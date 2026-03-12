@@ -113,6 +113,8 @@ node scripts/operational-cli.mjs status
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
 - [docs/INGEST.md](./docs/INGEST.md)
 - [docs/OPERATIONAL_LEARNING.md](./docs/OPERATIONAL_LEARNING.md)
+- [docs/ADOPTION_PLAN_MEMORY_EVOLUTION.md](./docs/ADOPTION_PLAN_MEMORY_EVOLUTION.md)
+- [docs/ADOPTION_LOG_MEMORY_EVOLUTION.md](./docs/ADOPTION_LOG_MEMORY_EVOLUTION.md)
 - [skills/clawbridge/START_HERE.md](./skills/clawbridge/START_HERE.md)
 
 ## Notes

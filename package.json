@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "breadcrumb:log": "node scripts/log-memory-evolution-breadcrumb.mjs"
   },
   "keywords": ["memory", "rag", "context-injection"],
   "dependencies": {
