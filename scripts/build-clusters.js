@@ -16,19 +16,33 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 
 const WORKSPACE = path.join(os.homedir(), '.openclaw/workspace');
 const MEMORY_DIR = path.join(WORKSPACE, 'memory');
 const CLUSTERS_DIR = path.join(MEMORY_DIR, 'clusters');
+const API_MEMORIES_DIR = path.join(MEMORY_DIR, 'api-memories');
 
-// Project keyword routing — same as plugin.js projectKeywords
+// Project keyword routing — auto-extended by cluster filenames at runtime
 const PROJECT_KEYWORDS = {
-  moltmud:        ['moltmud', 'zorthak', 'mud', 'bridge'],
   openclaw:       ['openclaw', 'gateway', 'plugin', 'session', 'cron', 'heartbeat'],
-  rgcs:           ['rgcs', 'steamvr', 'driver', 'smoothing', 'controller', 'overlay', 'hmd', 'quaternion'],
   clawtext:       ['clawtext', 'cluster', 'rag', 'injection', 'embedding', 'extract', 'ingest'],
   infrastructure: ['infrastructure', 'deployment', 'server', 'ssh', 'config', 'setup', 'tailscale'],
 };
+
+// Auto-extend from existing cluster filenames (picks up user-specific projects)
+try {
+  if (fs.existsSync(CLUSTERS_DIR)) {
+    for (const f of fs.readdirSync(CLUSTERS_DIR)) {
+      if (f.startsWith('cluster-') && f.endsWith('.json')) {
+        const proj = f.replace('cluster-', '').replace('.json', '');
+        if (!PROJECT_KEYWORDS[proj]) {
+          PROJECT_KEYWORDS[proj] = [proj]; // bare keyword = project name itself
+        }
+      }
+    }
+  }
+} catch {}
 
 // Noise words to exclude from keyword extraction
 const NOISE = new Set([
@@ -48,6 +62,31 @@ const NOISE = new Set([
 ]);
 
 const forceRebuild = process.argv.includes('--force');
+
+/** Generate a deterministic deduplication hash for memory content */
+function dedupeHash(content) {
+  return crypto.createHash('sha1').update(content).digest('hex').slice(0, 16);
+}
+
+/** Generate a unique memory ID from source + content hash */
+function memoryId(sourceFile, contentHash) {
+  const input = sourceFile + ':' + contentHash;
+  return 'mem_' + crypto.createHash('sha1').update(input).digest('hex').slice(0, 12);
+}
+
+/**
+ * Try to extract a date from sourceFile name (YYYY-MM-DD.md pattern)
+ * or frontmatter. Returns ISO string or null.
+ */
+function extractCreatedAt(sourceFile, frontmatter) {
+  if (frontmatter && frontmatter.date) {
+    const d = new Date(frontmatter.date);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  }
+  const dateMatch = sourceFile.match(/(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) return new Date(dateMatch[1] + 'T00:00:00Z').toISOString();
+  return null;
+}
 
 function tokenize(text) {
   return text
@@ -191,7 +230,19 @@ function splitIntoChunks(content, sourceFile) {
       const project = fm.project || detectProject(body, Array.isArray(keywords) ? keywords : []);
       const type = detectType(fm, body);
       const confidence = 0.8;
-      chunks.push({ content: body, keywords: Array.isArray(keywords) ? keywords : [keywords], project, type, confidence, sourceFile });
+      const hash = dedupeHash(body);
+      chunks.push({
+        id: memoryId(sourceFile, hash),
+        content: body,
+        keywords: Array.isArray(keywords) ? keywords : [keywords],
+        project,
+        type,
+        confidence,
+        sourceFile,
+        sourceType: 'extracted',
+        createdAt: extractCreatedAt(sourceFile, fm),
+        dedupeHash: hash,
+      });
     });
     return chunks;
   }
@@ -208,7 +259,19 @@ function splitIntoChunks(content, sourceFile) {
     const keywords = topKeywords(full);
     const project = detectProject(full, keywords);
     const type = detectType({}, full);
-    chunks.push({ content: heading + '\n\n' + body, keywords, project, type, confidence: 0.65, sourceFile });
+    const hash = dedupeHash(full);
+    chunks.push({
+      id: memoryId(sourceFile, hash),
+      content: heading + '\n\n' + body,
+      keywords,
+      project,
+      type,
+      confidence: 0.65,
+      sourceFile,
+      sourceType: 'extracted',
+      createdAt: extractCreatedAt(sourceFile, {}),
+      dedupeHash: hash,
+    });
   });
 
   return chunks;
@@ -237,6 +300,40 @@ function loadMemoryFiles() {
   return mdFiles;
 }
 
+/**
+ * Load API memories (JSON files from memory/api-memories/).
+ * These are written by the ClawText Memory API and were previously
+ * invisible to the cluster builder. Now they get included.
+ */
+function loadApiMemories() {
+  const results = [];
+  if (!fs.existsSync(API_MEMORIES_DIR)) return results;
+
+  for (const file of fs.readdirSync(API_MEMORIES_DIR).filter(f => f.endsWith('.json'))) {
+    try {
+      const data = JSON.parse(fs.readFileSync(path.join(API_MEMORIES_DIR, file), 'utf8'));
+      const content = data.body || data.summary || '';
+      if (content.length < 20) continue;
+
+      results.push({
+        id: data.id || memoryId('api-memories/' + file, dedupeHash(content)),
+        content,
+        keywords: data.keywords || [],
+        project: data.project || 'default',
+        type: data.type || 'note',
+        confidence: data.confidence || 0.85,
+        sourceFile: 'memory/api-memories/' + file,
+        sourceType: data.sourceType || 'api',
+        createdAt: data.createdAt || data.observedAt || null,
+        dedupeHash: data.dedupeHash || dedupeHash(content),
+      });
+    } catch (e) {
+      console.warn(`  skip api memory ${file}: ${e.message}`);
+    }
+  }
+  return results;
+}
+
 // --- Main ---
 
 fs.mkdirSync(CLUSTERS_DIR, { recursive: true });
@@ -246,6 +343,7 @@ console.log(`[build-clusters] Found ${files.length} memory files`);
 
 // Group chunks by project
 const byProject = {};
+const seenHashes = new Set(); // deduplication across all sources
 
 files.forEach(filePath => {
   const rel = path.relative(WORKSPACE, filePath);
@@ -259,19 +357,55 @@ files.forEach(filePath => {
 
   const chunks = splitIntoChunks(content, rel);
   chunks.forEach(chunk => {
+    // Deduplicate by content hash
+    if (chunk.dedupeHash && seenHashes.has(chunk.dedupeHash)) return;
+    if (chunk.dedupeHash) seenHashes.add(chunk.dedupeHash);
+
     const proj = chunk.project || 'default';
     if (!byProject[proj]) byProject[proj] = [];
     byProject[proj].push({
-      content:    chunk.content,
-      keywords:   chunk.keywords,
-      type:       chunk.type,
-      project:    proj,
-      confidence: chunk.confidence,
-      sourceFile: chunk.sourceFile,
-      updatedAt:  new Date().toISOString(),
+      id:          chunk.id,
+      content:     chunk.content,
+      keywords:    chunk.keywords,
+      type:        chunk.type,
+      project:     proj,
+      confidence:  chunk.confidence,
+      sourceFile:  chunk.sourceFile,
+      sourceType:  chunk.sourceType || 'extracted',
+      createdAt:   chunk.createdAt || null,
+      dedupeHash:  chunk.dedupeHash || null,
+      updatedAt:   new Date().toISOString(),
     });
   });
 });
+
+// Also load API memories (fixes dual storage gap)
+const apiMemories = loadApiMemories();
+let apiCount = 0;
+apiMemories.forEach(mem => {
+  if (mem.dedupeHash && seenHashes.has(mem.dedupeHash)) return;
+  if (mem.dedupeHash) seenHashes.add(mem.dedupeHash);
+
+  const proj = mem.project || 'default';
+  if (!byProject[proj]) byProject[proj] = [];
+  byProject[proj].push({
+    id:          mem.id,
+    content:     mem.content,
+    keywords:    mem.keywords,
+    type:        mem.type,
+    project:     proj,
+    confidence:  mem.confidence,
+    sourceFile:  mem.sourceFile,
+    sourceType:  mem.sourceType,
+    createdAt:   mem.createdAt,
+    dedupeHash:  mem.dedupeHash,
+    updatedAt:   new Date().toISOString(),
+  });
+  apiCount++;
+});
+if (apiCount > 0) {
+  console.log(`[build-clusters] Loaded ${apiCount} API memories from ${API_MEMORIES_DIR}`);
+}
 
 // Write cluster files
 const builtAt = new Date().toISOString();

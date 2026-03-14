@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 interface Memory {
+  id?: string;
   content: string;
   type: string;
   source: string;
@@ -12,6 +13,10 @@ interface Memory {
   confidence: number;
   keywords: string[];
   updatedAt: string;
+  sourceType?: string;
+  createdAt?: string;
+  dedupeHash?: string;
+  sourceFile?: string;
 }
 
 interface Cluster {
@@ -27,6 +32,9 @@ interface Cluster {
 export class ClawTextRAG {
   private clustersDir: string;
   private clusters: Map<string, Cluster> = new Map();
+  private documentFrequency: Map<string, number> = new Map();
+  private totalDocuments: number = 0;
+  private avgDocLength: number = 100;
   private config: {
     enabled: boolean;
     maxMemories: number;
@@ -56,6 +64,7 @@ export class ClawTextRAG {
 
   /**
    * Load all cluster files into memory (O(1) lookup)
+   * Also computes document frequency stats for BM25 scoring.
    */
   private loadClusters(): void {
     if (!fs.existsSync(this.clustersDir)) {
@@ -75,22 +84,62 @@ export class ClawTextRAG {
       }
     });
 
-    console.log(`[ClawText RAG] Loaded ${this.clusters.size} clusters`);
+    // Compute document frequency stats for BM25
+    let totalLen = 0;
+    this.totalDocuments = 0;
+    this.documentFrequency.clear();
+
+    this.clusters.forEach(cluster => {
+      for (const mem of cluster.memories) {
+        this.totalDocuments++;
+        const tokens = (mem.content + ' ' + mem.keywords.join(' ')).toLowerCase().split(/\s+/);
+        totalLen += tokens.length;
+        const uniqueTerms = new Set(tokens.filter(t => t.length > 2));
+        for (const term of uniqueTerms) {
+          this.documentFrequency.set(term, (this.documentFrequency.get(term) || 0) + 1);
+        }
+      }
+    });
+
+    this.avgDocLength = this.totalDocuments > 0 ? totalLen / this.totalDocuments : 100;
+    console.log(`[ClawText RAG] Loaded ${this.clusters.size} clusters, ${this.totalDocuments} docs, avgLen=${Math.round(this.avgDocLength)}`);
   }
 
   /**
-   * Search memories by keywords using BM25-style scoring
+   * Search memories by keywords using BM25 scoring with TF-IDF weighting.
+   * k1 controls term frequency saturation; b controls document length normalization.
    */
   private bm25Score(query: string, memory: Memory): number {
-    const queryTerms = query.toLowerCase().split(/\s+/);
+    const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
     const memoryText = (memory.content + ' ' + memory.keywords.join(' ')).toLowerCase();
+    const memoryTokens = memoryText.split(/\s+/);
+    const docLen = memoryTokens.length;
+
+    // BM25 parameters
+    const k1 = 1.5;
+    const b = 0.75;
+
+    // Average document length across all loaded clusters (rough estimate)
+    const avgDl = this.avgDocLength || 100;
 
     let score = 0;
-    queryTerms.forEach(term => {
-      if (memoryText.includes(term)) {
-        score += 1;
+    for (const term of queryTerms) {
+      // Term frequency in this document
+      let tf = 0;
+      for (const tok of memoryTokens) {
+        if (tok === term || tok.includes(term)) tf++;
       }
-    });
+      if (tf === 0) continue;
+
+      // Inverse document frequency (approximated from loaded clusters)
+      const df = this.documentFrequency.get(term) || 1;
+      const totalDocs = this.totalDocuments || 1;
+      const idf = Math.log((totalDocs - df + 0.5) / (df + 0.5) + 1);
+
+      // BM25 formula
+      const tfNorm = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (docLen / avgDl)));
+      score += idf * tfNorm;
+    }
 
     // Boost by confidence
     score *= memory.confidence;
@@ -99,10 +148,87 @@ export class ClawTextRAG {
   }
 
   /**
-   * Find relevant memories for a query
+   * Parse time expressions from query and return a date filter.
+   * Supports: "last week", "this month", "last 7 days", "since 2026-03-01", "today", "yesterday"
+   */
+  private parseTimeFilter(query: string): { after?: Date; before?: Date } | null {
+    const lower = query.toLowerCase();
+    const now = new Date();
+
+    // "today"
+    if (/\btoday\b/.test(lower)) {
+      const start = new Date(now); start.setHours(0, 0, 0, 0);
+      return { after: start };
+    }
+    // "yesterday"
+    if (/\byesterday\b/.test(lower)) {
+      const start = new Date(now); start.setDate(start.getDate() - 1); start.setHours(0, 0, 0, 0);
+      const end = new Date(now); end.setHours(0, 0, 0, 0);
+      return { after: start, before: end };
+    }
+    // "last N days/weeks/months"
+    const lastN = lower.match(/last\s+(\d+)\s+(day|week|month)s?/);
+    if (lastN) {
+      const n = parseInt(lastN[1]);
+      const unit = lastN[2];
+      const start = new Date(now);
+      if (unit === 'day') start.setDate(start.getDate() - n);
+      else if (unit === 'week') start.setDate(start.getDate() - n * 7);
+      else if (unit === 'month') start.setMonth(start.getMonth() - n);
+      return { after: start };
+    }
+    // "last week" / "this week" / "last month" / "this month"
+    if (/\blast\s+week\b/.test(lower)) {
+      const start = new Date(now); start.setDate(start.getDate() - 7);
+      return { after: start };
+    }
+    if (/\bthis\s+week\b/.test(lower)) {
+      const start = new Date(now);
+      start.setDate(start.getDate() - start.getDay());
+      start.setHours(0, 0, 0, 0);
+      return { after: start };
+    }
+    if (/\blast\s+month\b/.test(lower)) {
+      const start = new Date(now); start.setMonth(start.getMonth() - 1);
+      return { after: start };
+    }
+    if (/\bthis\s+month\b/.test(lower)) {
+      const start = new Date(now); start.setDate(1); start.setHours(0, 0, 0, 0);
+      return { after: start };
+    }
+    // "since YYYY-MM-DD"
+    const since = lower.match(/since\s+(\d{4}-\d{2}-\d{2})/);
+    if (since) {
+      return { after: new Date(since[1] + 'T00:00:00Z') };
+    }
+
+    return null;
+  }
+
+  /**
+   * Filter memories by time range using createdAt or updatedAt.
+   */
+  private filterByTime(memories: Memory[], filter: { after?: Date; before?: Date }): Memory[] {
+    return memories.filter(m => {
+      const dateStr = m.createdAt || m.updatedAt;
+      if (!dateStr) return true; // include undated memories
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return true;
+      if (filter.after && d < filter.after) return false;
+      if (filter.before && d > filter.before) return false;
+      return true;
+    });
+  }
+
+  /**
+   * Find relevant memories for a query.
+   * Supports time-aware filtering ("last week", "since 2026-03-01", etc.)
    */
   findRelevantMemories(query: string, projectKeywords: string[] = []): Memory[] {
     if (!this.config.enabled || !query) return [];
+
+    // Parse time filter from query (if present)
+    const timeFilter = this.parseTimeFilter(query);
 
     // Determine which clusters to search
     const targetProjects = projectKeywords.length > 0 
@@ -115,28 +241,33 @@ export class ClawTextRAG {
       targetProjects.push(...Array.from(this.clusters.keys()));
     }
 
-    const allMemories: Array<Memory & { score: number }> = [];
+    let candidates: Memory[] = [];
 
-    // Search across target clusters
+    // Collect all candidate memories from target clusters
     targetProjects.forEach(project => {
       const cluster = this.clusters.get(project);
       if (!cluster) return;
 
       cluster.memories.forEach(memory => {
         if (memory.confidence >= this.config.minConfidence) {
-          const score = this.bm25Score(query, memory);
-          if (score > 0) {
-            allMemories.push({ ...memory, score });
-          }
+          candidates.push(memory);
         }
       });
     });
 
-    // Sort by score and truncate
-    return allMemories
+    // Apply time filter if present
+    if (timeFilter) {
+      candidates = this.filterByTime(candidates, timeFilter);
+    }
+
+    // Score and rank
+    const scored = candidates
+      .map(memory => ({ ...memory, score: this.bm25Score(query, memory) }))
+      .filter(m => m.score > 0)
       .sort((a, b) => b.score - a.score)
-      .slice(0, this.config.maxMemories)
-      .map(({ score, ...memory }) => memory);
+      .slice(0, this.config.maxMemories);
+
+    return scored.map(({ score, ...memory }) => memory);
   }
 
   /**

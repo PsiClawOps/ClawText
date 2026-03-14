@@ -1,19 +1,48 @@
+import fs from 'fs';
+import path from 'path';
 import ClawTextRAG from './rag.js';
 
 /**
  * Plugin hook for automatic context injection
  * Fires on before_prompt_build to inject relevant memories
+ *
+ * Project keywords are auto-detected from cluster filenames — no hardcoding.
  */
 export class ClawTextInjectionPlugin {
   private rag: ClawTextRAG;
-  private projectKeywords: Record<string, string[]> = {
-    moltmud: ['moltmud', 'agent', 'game'],
-    openclaw: ['openclaw', 'gateway', 'plugin'],
-    rgcs: ['rgcs', 'raycast', 'script'],
-  };
 
   constructor() {
     this.rag = new ClawTextRAG();
+  }
+
+  /**
+   * Auto-detect available project IDs from cluster filenames.
+   * Returns project names derived from cluster-<project>.json files.
+   */
+  private getAvailableProjects(): string[] {
+    const clustersDir = path.join(
+      process.env.HOME || '',
+      '.openclaw/workspace/memory/clusters'
+    );
+    try {
+      return fs
+        .readdirSync(clustersDir)
+        .filter(f => f.startsWith('cluster-') && f.endsWith('.json'))
+        .map(f => f.replace('cluster-', '').replace('.json', ''));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Match project IDs that appear in the given text.
+   * Uses cluster-derived project names as the keyword set.
+   */
+  private detectProjectKeywords(text: string): string[] {
+    const lower = text.toLowerCase();
+    return this.getAvailableProjects().filter(project =>
+      lower.includes(project.toLowerCase())
+    );
   }
 
   /**
@@ -27,17 +56,9 @@ export class ClawTextInjectionPlugin {
     model?: string;
   }): Promise<{ systemPrompt: string; injectionStats?: any }> {
     try {
-      // Extract project keywords from user message or session context
-      let projectKeywords: string[] = [];
-      Object.entries(this.projectKeywords).forEach(([_project, keywords]) => {
-        const matched = keywords.filter(kw =>
-          context.userMessage.toLowerCase().includes(kw) ||
-          context.systemPrompt.toLowerCase().includes(kw)
-        );
-        if (matched.length > 0) {
-          projectKeywords.push(...matched);
-        }
-      });
+      // Auto-detect projects from message + system prompt
+      const combinedText = context.userMessage + ' ' + context.systemPrompt;
+      const projectKeywords = this.detectProjectKeywords(combinedText);
 
       // Inject memories
       const { prompt, injected, tokens } = this.rag.injectMemories(
