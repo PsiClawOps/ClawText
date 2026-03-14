@@ -2,10 +2,20 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { execFileSync, execSync } = require('child_process');
 
 const DISCORD_MAX_CHUNK = 1800;
 const SEND_RETRIES = 2;
+const MAX_RUNTIME_MS_DEFAULT = 120000;
+const MAX_LIST_ITEMS_DEFAULT = 15;
+const MAX_TEXT_FIELD_CHARS_DEFAULT = 2000;
+const MAX_READ_LIMIT_DEFAULT = 80;
+const MAX_READ_LIMIT_HARD_CAP = 200;
+const MAX_TOTAL_CHUNKS_DEFAULT = 12;
+const OPENCLAW_CMD_TIMEOUT_MS = 30000;
+const LOCK_PATH = path.join(process.env.XDG_RUNTIME_DIR || os.tmpdir(), 'clawbridge', 'run.lock');
+const LOCK_STALE_MS_DEFAULT = 10 * 60 * 1000;
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -50,6 +60,13 @@ function asArray(v) {
   return Array.isArray(v) ? v : [v];
 }
 
+function normalizeIncomingTarget(rawTarget) {
+  const target = String(rawTarget || '').trim();
+  if (target.startsWith('thread:')) return target.slice('thread:'.length).trim();
+  if (target.startsWith('channel:')) return target.slice('channel:'.length).trim();
+  return target;
+}
+
 function extractJson(output) {
   const t = String(output || '').trim();
   const idx = t.indexOf('{');
@@ -61,11 +78,85 @@ function extractJson(output) {
 }
 
 function runOpenclaw(args) {
-  const out = execFileSync('openclaw', args, {
-    encoding: 'utf8',
-    maxBuffer: 10 * 1024 * 1024,
+  try {
+    const out = execFileSync('openclaw', args, {
+      encoding: 'utf8',
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: OPENCLAW_CMD_TIMEOUT_MS,
+    });
+    return extractJson(out);
+  } catch (err) {
+    const stderr = err.stderr ? String(err.stderr || '').trim() : '';
+    const stdout = err.stdout ? String(err.stdout || '').trim() : '';
+    const details = [err.message, stdout, stderr].filter(Boolean).join(' | ');
+    throw new Error(`OpenClaw command failed for [${args.join(' ')}]: ${details}`);
+  }
+}
+
+function acquireRunLock(staleMs = LOCK_STALE_MS_DEFAULT) {
+  const lockDir = path.dirname(LOCK_PATH);
+  fs.mkdirSync(lockDir, { recursive: true });
+
+  let existing = null;
+  try {
+    const existingRaw = fs.readFileSync(LOCK_PATH, 'utf8');
+    existing = existingRaw ? JSON.parse(existingRaw) : null;
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      console.error(`ClawBridge: lock read issue (${err.message}); attempting overwrite.`);
+      existing = null;
+    }
+  }
+
+  const hasActiveOwner = (() => {
+    if (!existing || !existing.pid || !existing.startedAt) return false;
+    const age = Date.now() - Number(existing.startedAt);
+    if (!Number.isFinite(age) || age <= 0) return false;
+    if (age >= staleMs) return false;
+    try {
+      process.kill(Number(existing.pid), 0);
+      return true;
+    } catch (err) {
+      return err.code === 'ESRCH' ? false : true;
+    }
+  })();
+
+  if (hasActiveOwner) {
+    throw new Error(`Another clawbridge run is active (pid=${existing.pid}, startedAt=${existing.startedAt}). Abort to prevent duplicate token burn.`);
+  }
+
+  try {
+    fs.unlinkSync(LOCK_PATH);
+  } catch (_) {}
+
+  const payload = {
+    pid: process.pid,
+    startedAt: Date.now(),
+    runtimeMs: LOCK_STALE_MS_DEFAULT,
+    startedBy: process.env.USER || process.env.LOGNAME || 'unknown',
+  };
+
+  const fd = fs.openSync(LOCK_PATH, 'wx');
+  try {
+    fs.writeFileSync(fd, JSON.stringify(payload), 'utf8');
+  } finally {
+    fs.closeSync(fd);
+  }
+
+  const cleanup = () => {
+    try { fs.unlinkSync(LOCK_PATH); } catch (_) {}
+  };
+  process.once('exit', cleanup);
+  process.once('SIGINT', () => {
+    cleanup();
+    process.exit(130);
   });
-  return extractJson(out);
+  process.once('SIGTERM', () => {
+    cleanup();
+    process.exit(143);
+  });
+
+  return cleanup;
 }
 
 function assertCommandSuccess(payload, context = '') {
@@ -99,6 +190,26 @@ function uniq(xs) {
     }
   }
   return out;
+}
+
+function clampInt(value, fallback, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function truncateText(text, maxChars = MAX_TEXT_FIELD_CHARS_DEFAULT) {
+  const s = String(text || '').trim();
+  const limit = clampInt(maxChars, MAX_TEXT_FIELD_CHARS_DEFAULT, 80, 20000);
+  if (s.length <= limit) return s;
+  if (limit <= 1) return s.slice(0, limit);
+  return `${s.slice(0, limit - 1)}…`;
+}
+
+function normalizeList(items, maxItems, maxItemChars) {
+  return uniq(asArray(items))
+    .slice(0, clampInt(maxItems, MAX_LIST_ITEMS_DEFAULT, 1, 80))
+    .map((entry) => truncateText(entry, maxItemChars));
 }
 
 function splitForDiscord(text, max = DISCORD_MAX_CHUNK) {
@@ -136,7 +247,7 @@ function splitForDiscord(text, max = DISCORD_MAX_CHUNK) {
 }
 
 function readMessages(sourceThreadId, limit) {
-  const id = String(sourceThreadId).trim();
+  const id = normalizeIncomingTarget(sourceThreadId);
   const candidates = [id];
   if (!id.startsWith('channel:') && !id.startsWith('thread:')) {
     candidates.unshift(`channel:${id}`);
@@ -181,15 +292,51 @@ function safeWrite(filePath, text) {
   fs.writeFileSync(filePath, text, 'utf8');
 }
 
+function summarizeArtifacts(paths, artifacts, initMsg, mode) {
+  const sections = [];
+  const pushSection = (name, text, filePath, enabled = true) => {
+    if (!enabled) return;
+    const content = String(text || '');
+    const chunks = splitForDiscord(`## ${name.toUpperCase().replace(/_/g, ' ')}\n\n${content}`, DISCORD_MAX_CHUNK).length;
+    sections.push({
+      name,
+      path: filePath,
+      chars: content.length,
+      chunks,
+    });
+  };
+
+  pushSection('short', artifacts.short, paths.short, mode !== 'memory');
+  pushSection('full', artifacts.full, paths.full, true);
+  pushSection('bootstrap', artifacts.bootstrap, paths.bootstrap, mode !== 'memory');
+
+  const initChunks = splitForDiscord(initMsg, DISCORD_MAX_CHUNK).length;
+  const contentChunks = sections.reduce((sum, section) => sum + section.chunks, 0);
+
+  return {
+    init: {
+      chars: String(initMsg || '').length,
+      chunks: initChunks,
+    },
+    sections,
+    totalArtifactChars: sections.reduce((sum, section) => sum + section.chars, 0),
+    totalContentChunks: contentChunks,
+    totalOutgoingMessages: initChunks + contentChunks,
+  };
+}
+
 function makeArtifacts(args, messages, paths) {
   const chronological = [...messages].reverse();
   const nonBot = [...chronological].filter(m => !m?.author?.bot && String(m?.content || '').trim());
   const botMsgs = [...chronological].filter(m => m?.author?.bot && String(m?.content || '').trim());
 
-  const objective = (args.objective && String(args.objective).trim()) ||
-    (nonBot.length ? String(nonBot[nonBot.length - 1].content).trim().slice(0, 260) : 'Continue active work with full continuity.');
+  const objective = truncateText(
+    (args.objective && String(args.objective).trim()) ||
+    (nonBot.length ? String(nonBot[nonBot.length - 1].content).trim().slice(0, 260) : 'Continue active work with full continuity.'),
+    args.maxTextFieldChars
+  );
 
-  let established = uniq(asArray(args.established));
+  let established = normalizeList(asArray(args.established), args.maxListItems, args.maxTextFieldChars);
   if (!established.length) {
     const bullets = [];
     for (const m of botMsgs.slice(-10)) {
@@ -208,10 +355,10 @@ function makeArtifacts(args, messages, paths) {
     ];
   }
 
-  let open = uniq(asArray(args.open));
+  let open = normalizeList(asArray(args.open), args.maxListItems, args.maxTextFieldChars);
   if (!open.length) {
     const lastUser = nonBot.length ? String(nonBot[nonBot.length - 1].content || '') : '';
-    const guessed = lastUser.split(/\?|\n/).map(s => s.trim()).filter(Boolean).slice(0, 3);
+    const guessed = lastUser.split(/\?|\n/).map(s => truncateText(s.trim(), args.maxTextFieldChars)).filter(Boolean).slice(0, 3);
     open = guessed.length ? guessed.map(s => `${s}?`) : [
       'Finalize first milestone execution order for ClawTask.',
       'Define incident taxonomy and action-policy matrix details.',
@@ -219,7 +366,7 @@ function makeArtifacts(args, messages, paths) {
     ];
   }
 
-  let next = uniq(asArray(args.next));
+  let next = normalizeList(asArray(args.next), args.maxListItems, args.maxTextFieldChars);
   if (!next.length) {
     next = [
       'Seed ClawTask board cards for Milestone 1 in ClawDash lane.',
@@ -227,6 +374,9 @@ function makeArtifacts(args, messages, paths) {
       'Use ClawBridge continuity packets for major lane transfers.',
     ];
   }
+
+  open = open.map((item) => truncateText(item, args.maxTextFieldChars));
+  next = next.map((item) => truncateText(item, args.maxTextFieldChars));
 
   const lane = args.lane || 'ClawDash coordination lane';
   const product = args.product || 'ClawDash / ClawBridge';
@@ -353,7 +503,7 @@ function extractMessageId(payload, context) {
 
 function normalizeDiscordTarget(target) {
   const t = String(target || '').trim();
-  if (!t) return t;
+  if (!t) return [];
 
   const targets = [t];
   if (!t.startsWith('channel:') && !t.startsWith('thread:')) {
@@ -362,6 +512,46 @@ function normalizeDiscordTarget(target) {
   }
 
   return targets;
+}
+
+function isTerminalTargetError(err) {
+  const msg = String(err.message || '').toLowerCase();
+  return (
+    msg.includes('unknown channel') ||
+    msg.includes('unknown target') ||
+    msg.includes('unknown') && msg.includes('channel') ||
+    msg.includes('forbidden') ||
+    msg.includes('access')
+  );
+}
+
+function canReadTarget(target) {
+  const resp = runOpenclaw([
+    'message', 'read',
+    '--channel', 'discord',
+    '--target', target,
+    '--limit', '1',
+    '--json',
+  ]);
+  assertCommandSuccess(resp, `read destination check ${target}`);
+  return resp;
+}
+
+function resolveDestinationTarget(rawTarget) {
+  const normalized = normalizeIncomingTarget(rawTarget);
+  const candidates = normalizeDiscordTarget(normalized);
+  let lastError = null;
+
+  for (const target of candidates) {
+    try {
+      canReadTarget(target);
+      return target;
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  throw new Error(`Failed to validate destination thread/channel ${rawTarget}: ${lastError ? lastError.message : 'unknown error'}`);
 }
 
 function sendChunkToThread(threadId, c, idx) {
@@ -381,7 +571,9 @@ function sendChunkToThread(threadId, c, idx) {
       return extractMessageId(resp, `send chunk ${idx} to ${target}`);
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
-      continue;
+      if (isTerminalTargetError(lastError)) {
+        throw new Error(`Failed chunk ${idx}/${targets.length} due terminal channel target error: ${lastError.message}`);
+      }
     }
   }
 
@@ -402,6 +594,10 @@ function sendToThread(threadId, text) {
         break;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
+        if (isTerminalTargetError(lastError)) {
+          throw new Error(`Failed chunk ${i + 1}/${chunks.length} due terminal target error: ${lastError.message}`);
+        }
+
         attempt += 1;
         if (attempt > SEND_RETRIES) {
           throw new Error(`Failed chunk ${i + 1}/${chunks.length} after ${SEND_RETRIES + 1} attempts: ${lastError.message}`);
@@ -476,6 +672,14 @@ Usage:
 Options:
   --mode <continuity|memory|dual>   Output mode (default: continuity)
   --limit <n>                       Message read limit (default: 80)
+  --max-read-limit <n>              Hard cap on limit (default: 200)
+  --max-runtime-ms <n>              Abort runtime after N ms (default: 120000)
+  --max-text-chars <n>              Truncate large objective/open/next fields (default: 2000)
+  --max-list-items <n>              Truncate open/next/established item count (default: 15)
+  --max-total-chunks <n>            Maximum total outgoing Discord messages before blocking live send (default: 12)
+  --allow-large                     Allow live sends above max-total-chunks
+  --estimate-only                   Generate artifacts + predicted chunk counts only; do not post or ingest
+  --include-artifacts               Include full artifact bodies in JSON output (default: off)
   --workspace <path>                Workspace root (default: ~/.openclaw/workspace)
   --title "..."                     Required only when creating a new thread
   --attach-thread <id>              Post packet into an existing thread instead of creating one
@@ -521,14 +725,24 @@ function main() {
     process.exit(1);
   }
 
+  const lockCleanup = acquireRunLock();
   const workspace = args.workspace || path.join(process.env.HOME || '', '.openclaw', 'workspace');
-  const sourceThread = args['source-thread'] || args.sourceThread;
-  const targetForum = args['target-forum'] || args.targetForum;
+  const sourceThread = normalizeIncomingTarget(args['source-thread'] || args.sourceThread);
+  let targetForum = normalizeIncomingTarget(args['target-forum'] || args.targetForum);
   const title = args.title;
-  const attachThread = args['attach-thread'] || args.attachThread;
+  const attachThread = normalizeIncomingTarget(args['attach-thread'] || args.attachThread);
   const noCreateThread = Boolean(args['no-create-thread'] || args.noCreateThread);
   const mode = (args.mode || 'continuity').toLowerCase();
-  const limit = Number(args.limit || 80);
+  const rawLimit = Number(args.limit || MAX_READ_LIMIT_DEFAULT);
+  const maxReadLimit = clampInt(args['max-read-limit'] || args.maxReadLimit || MAX_READ_LIMIT_HARD_CAP, MAX_READ_LIMIT_HARD_CAP, 1, 500);
+  const limit = Math.min(Math.max(rawLimit, 1), maxReadLimit);
+  const maxRuntimeMs = clampInt(args['max-runtime-ms'] || args.maxRuntimeMs || MAX_RUNTIME_MS_DEFAULT, MAX_RUNTIME_MS_DEFAULT, 5000, 600000);
+  const maxTextFieldChars = clampInt(args['max-text-chars'] || args.maxTextChars || MAX_TEXT_FIELD_CHARS_DEFAULT, MAX_TEXT_FIELD_CHARS_DEFAULT, 80, 20000);
+  const maxListItems = clampInt(args['max-list-items'] || args.maxListItems || MAX_LIST_ITEMS_DEFAULT, MAX_LIST_ITEMS_DEFAULT, 1, 80);
+  const maxTotalChunks = clampInt(args['max-total-chunks'] || args.maxTotalChunks || MAX_TOTAL_CHUNKS_DEFAULT, MAX_TOTAL_CHUNKS_DEFAULT, 1, 500);
+  const estimateOnly = Boolean(args['estimate-only'] || args.estimateOnly);
+  const includeArtifacts = Boolean(args['include-artifacts'] || args.includeArtifacts);
+  const allowLarge = Boolean(args['allow-large'] || args.allowLarge);
 
   if (!sourceThread || !targetForum) {
     console.error('Missing required args: --source-thread, --target-forum');
@@ -537,6 +751,13 @@ function main() {
 
   if (!attachThread && !noCreateThread && !title) {
     console.error('Missing required arg when creating a new thread: --title');
+    process.exit(1);
+  }
+
+  try {
+    targetForum = resolveDestinationTarget(targetForum);
+  } catch (err) {
+    console.error(`Invalid target forum ${targetForum}: ${err.message}`);
     process.exit(1);
   }
 
@@ -560,7 +781,26 @@ function main() {
     title,
     mode,
     limit,
+    maxTextFieldChars,
+    maxListItems,
+    maxRuntimeMs,
+    maxTotalChunks,
+    estimateOnly,
+    includeArtifacts,
+    allowLarge,
   };
+
+  if (rawLimit !== limit) {
+    console.error(`ClawBridge: capped --limit ${rawLimit} to ${limit} (max-read-limit=${maxReadLimit}).`);
+  }
+
+  const startedAtMs = Date.now();
+  const hardTimeout = setTimeout(() => {
+    const elapsed = Date.now() - startedAtMs;
+    console.error(`ClawBridge timeout after ${elapsed}ms (limit ${maxRuntimeMs}ms). Aborting to prevent token burn.`);
+    process.exit(2);
+  }, maxRuntimeMs);
+  hardTimeout.unref();
 
   const messages = readMessages(sourceThread, limit);
   const artifacts = makeArtifacts(normalizedArgs, messages, paths);
@@ -583,7 +823,58 @@ function main() {
     attached: false,
   };
 
+  const artifactSummary = summarizeArtifacts(paths, artifacts, initMsg, mode);
+  const exceedsChunkCap = artifactSummary.totalOutgoingMessages > maxTotalChunks;
+
+  if (estimateOnly) {
+    clearTimeout(hardTimeout);
+    lockCleanup();
+    const estimateResult = {
+      ok: true,
+      mode,
+      estimateOnly: true,
+      sourceThread,
+      targetForum,
+      attachThread: attachThread || null,
+      safety: {
+        maxTotalChunks,
+        allowLarge,
+        exceedsChunkCap,
+      },
+      artifactSummary,
+      artifacts: includeArtifacts ? {
+        short: artifacts.short,
+        full: artifacts.full,
+        bootstrap: artifacts.bootstrap,
+      } : {
+        shortPath: paths.short,
+        fullPath: paths.full,
+        bootstrapPath: paths.bootstrap,
+      },
+    };
+    console.log(JSON.stringify(estimateResult, null, 2));
+    return;
+  }
+
+  if (exceedsChunkCap && !allowLarge) {
+    throw new Error(
+      `Blocked live send: estimated ${artifactSummary.totalOutgoingMessages} outgoing Discord messages exceeds max-total-chunks=${maxTotalChunks}. Re-run with --estimate-only to inspect or --allow-large to override.`
+    );
+  }
+
   let threadId = attachThread || null;
+  if (threadId) {
+    try {
+      threadId = resolveDestinationTarget(threadId);
+    } catch (err) {
+      if (noCreateThread) {
+        throw err;
+      }
+      console.error(`ClawBridge: attach target invalid (${threadId}); creating a new thread instead.`);
+      threadId = null;
+    }
+  }
+
   const createdThread = !threadId && !noCreateThread;
   if (createdThread) {
     threadId = createThread(targetForum, title, initMsg);
@@ -619,7 +910,16 @@ function main() {
     threadUrl: threadId ? `https://discord.com/channels/${args['guild-id'] || args.guildId || '1474997926919929927'}/${targetForum}/${threadId}` : null,
     mode,
     postResults,
-    artifacts,
+    artifactSummary,
+    artifacts: includeArtifacts ? {
+      short: artifacts.short,
+      full: artifacts.full,
+      bootstrap: artifacts.bootstrap,
+    } : {
+      shortPath: paths.short,
+      fullPath: paths.full,
+      bootstrapPath: paths.bootstrap,
+    },
     ingested: ingestResult.ingested,
     ok: true,
   };
