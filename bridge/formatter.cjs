@@ -47,7 +47,7 @@ function formatShort(packet, paths = {}) {
   const s = packet.semantic || {};
   const e = packet.episodic || {};
 
-  const status = s.state?.status || 'Unknown';
+  const status = s.state?.status || (s._raw ? 'Active' : 'Unknown');
   const blockers = (p.blockers || []).map(b => `• ${typeof b === 'string' ? b : b.description || b}`).join('\n');
   const nextActions = (p.next_actions || []).slice(0, 3).map(a => `• ${typeof a === 'string' ? a : a.action || a}`).join('\n');
   const decisions = [];
@@ -57,6 +57,15 @@ function formatShort(packet, paths = {}) {
   const recentEvents = timeline.slice(-3).flatMap(t =>
     (t.events || []).map(ev => `• ${t.date}: ${ev}`)
   );
+
+  // If _raw exists in episodic but no structured timeline, extract key events
+  if (!recentEvents.length && e._raw) {
+    const rawLines = e._raw.split('\n')
+      .filter(l => l.match(/^\d+\.\s*\*\*/))
+      .slice(-3)
+      .map(l => `• ${l.replace(/^\d+\.\s*/, '').trim()}`);
+    recentEvents.push(...rawLines);
+  }
 
   const sections = [
     `# ClawBridge Handoff — Short Summary`,
@@ -68,10 +77,22 @@ function formatShort(packet, paths = {}) {
 
   if (blockers) {
     sections.push('', '**Blockers:**', blockers);
+  } else if (p._raw && /block/i.test(p._raw)) {
+    const rawBlockers = p._raw.split('\n')
+      .filter(l => /block|critical/i.test(l))
+      .slice(0, 3)
+      .map(l => `• ${l.replace(/^\d+\.\s*/, '').trim()}`);
+    if (rawBlockers.length) sections.push('', '**Blockers:**', ...rawBlockers);
   }
 
   if (nextActions) {
     sections.push('', '**Next Actions:**', nextActions);
+  } else if (p._raw) {
+    const rawActions = p._raw.split('\n')
+      .filter(l => l.match(/^\d+\.\s*\*\*/))
+      .slice(0, 3)
+      .map(l => `• ${l.replace(/^\d+\.\s*/, '').trim()}`);
+    if (rawActions.length) sections.push('', '**Top Priorities:**', ...rawActions);
   }
 
   if (recentEvents.length) {
@@ -111,6 +132,9 @@ function formatFull(packet) {
   if (p.blockers?.length) {
     sections.push('', '**Blockers:**');
     p.blockers.forEach(b => sections.push(`- 🔴 ${typeof b === 'string' ? b : b}`));
+  } else if (p._raw && /block/i.test(p._raw)) {
+    sections.push('', '**Blockers:**');
+    sections.push(p._raw.split('\n').filter(l => /block/i.test(l)).slice(0, 5).map(l => `- ${l.trim()}`).join('\n'));
   }
   if (p.next_actions?.length) {
     sections.push('', '**Next Actions:**');
@@ -119,12 +143,15 @@ function formatFull(packet) {
       const pri = typeof a === 'object' ? ` (${a.priority || ''})` : '';
       sections.push(`- ${action}${pri}`);
     });
+  } else if (p._raw) {
+    sections.push('', '**Priority Assessment:**');
+    sections.push(p._raw);
   }
   sections.push('');
 
   // Semantic (facts, state)
   sections.push('## 📦 Facts & State');
-  if (s.state) {
+  if (s.state && Object.keys(s.state).length) {
     Object.entries(s.state).forEach(([k, v]) => {
       sections.push(`- **${k}:** ${v}`);
     });
@@ -134,19 +161,25 @@ function formatFull(packet) {
     s.facts.forEach(f => {
       sections.push(`- \`${f.key}\`: \`${f.value}\` (${f.type || 'fact'})`);
     });
+  } else if (s._raw) {
+    sections.push(s._raw);
   }
   sections.push('');
 
   // Episodic (timeline)
   sections.push('## 🕐 Timeline');
-  (e.timeline || []).forEach(t => {
-    sections.push(`\n### ${t.date || 'Unknown date'}`);
-    (t.events || []).forEach(ev => sections.push(`- ${ev}`));
-  });
+  if ((e.timeline || []).length) {
+    (e.timeline || []).forEach(t => {
+      sections.push(`\n### ${t.date || 'Unknown date'}`);
+      (t.events || []).forEach(ev => sections.push(`- ${ev}`));
+    });
+  } else if (e._raw) {
+    sections.push(e._raw);
+  }
   sections.push('');
 
   // Procedural (lessons, workflows)
-  if (proc.lessons?.length || proc.workflows?.length) {
+  if (proc.lessons?.length || proc.workflows?.length || proc._raw) {
     sections.push('## 🔧 Lessons & Workflows');
     (proc.lessons || []).forEach(l => {
       if (typeof l === 'string') {
@@ -161,27 +194,36 @@ function formatFull(packet) {
       sections.push(`\n**${w.name || 'Workflow'}:**`);
       (w.steps || []).forEach((s, i) => sections.push(`${i + 1}. ${s}`));
     });
+    if (proc._raw && !proc.lessons?.length && !proc.workflows?.length) {
+      sections.push(proc._raw);
+    }
     sections.push('');
   }
 
   // Relational
-  if (r.participants?.length || r.dynamics) {
+  if (r.participants?.length || r.dynamics || r._raw) {
     sections.push('## 👥 Working Dynamics');
     if (r.dynamics) sections.push(r.dynamics);
     (r.participants || []).forEach(p => {
       sections.push(`- **${p.name}** (${p.role || 'participant'}): ${p.style || ''}`);
     });
+    if (r._raw && !r.participants?.length && !r.dynamics) {
+      sections.push(r._raw);
+    }
     sections.push('');
   }
 
   // Implicit
-  if (imp.context?.length || imp.quality_bar) {
+  if (imp.context?.length || imp.quality_bar || imp._raw) {
     sections.push('## 💡 Implicit Context');
     if (imp.quality_bar) sections.push(`**Quality bar:** ${imp.quality_bar}`);
     (imp.context || []).forEach(c => {
       const conf = c.confidence ? ` (confidence: ${c.confidence})` : '';
       sections.push(`- ${c.observation || c}${conf}`);
     });
+    if (imp._raw && !imp.context?.length && !imp.quality_bar) {
+      sections.push(imp._raw);
+    }
     sections.push('');
   }
 
@@ -257,7 +299,7 @@ function formatClipboard(packet) {
   const lines = [
     `🧠 CLAWBRIDGE HANDOFF — ${s.state?.project || 'Project'}`,
     '',
-    `STATUS: ${s.state?.status || 'Unknown'}`,
+    `STATUS: ${s.state?.status || (s._raw ? 'Active' : 'Unknown')}`,
     `URGENCY: ${p.urgency || 'medium'}`,
     `FOCUS: ${p.focus || 'Continue active work'}`,
   ];
@@ -272,6 +314,12 @@ function formatClipboard(packet) {
     p.next_actions.slice(0, 3).forEach(a => {
       lines.push(`• ${typeof a === 'string' ? a : a.action || a}`);
     });
+  } else if (p._raw) {
+    const rawActions = p._raw.split('\n')
+      .filter(l => l.match(/^\d+\.\s*\*\*/))
+      .slice(0, 3)
+      .map(l => `• ${l.replace(/^\d+\.\s*/, '').replace(/\*\*/g, '').trim()}`);
+    if (rawActions.length) lines.push('', 'NEXT:', ...rawActions);
   }
 
   if (s.facts?.length) {

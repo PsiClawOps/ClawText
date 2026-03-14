@@ -17,33 +17,35 @@ const extractor = require('./extractor.cjs');
 const formatter = require('./formatter.cjs');
 
 /**
- * Call an LLM via openclaw CLI.
- * Returns the text response.
+ * Call an LLM via openclaw agent CLI.
+ * Uses `openclaw agent --local --json -m "..."` for one-shot LLM calls.
+ * Returns the text response, or null on failure.
  */
 function callLLM(prompt, model = null) {
-  // Use openclaw's built-in prompt command if available, otherwise
-  // fall back to a simple stdin approach
-  const args = ['prompt'];
-  if (model) args.push('--model', model);
-  args.push('--json');
+  const args = ['agent', '--agent', 'channel-mini', '--local', '--json', '-m', prompt];
+  if (model) args.splice(3, 0, '--model', model);
 
   try {
     const result = execFileSync('openclaw', args, {
-      input: prompt,
       encoding: 'utf8',
       maxBuffer: 10 * 1024 * 1024,
       timeout: 120000, // 2 min timeout
+      stdio: ['pipe', 'pipe', 'pipe'], // suppress stderr noise
     });
 
-    // Try to parse JSON response
+    // Parse JSON response — extract text from payloads array
     try {
-      const parsed = JSON.parse(result.trim());
+      const lines = result.split('\n').filter(l => l.trim());
+      // Find the JSON payload (skip log lines that start with [)
+      const jsonStart = result.indexOf('{');
+      if (jsonStart === -1) return result.trim();
+      const parsed = JSON.parse(result.slice(jsonStart));
+      if (parsed.payloads?.[0]?.text) return parsed.payloads[0].text;
       return parsed.response || parsed.content || parsed.text || result.trim();
     } catch {
       return result.trim();
     }
   } catch (e) {
-    // Fallback: if openclaw prompt doesn't exist, return raw extraction
     console.error(`[ClawBridge] LLM call failed: ${e.message}`);
     return null;
   }
