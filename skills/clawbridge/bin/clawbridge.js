@@ -67,6 +67,23 @@ function normalizeIncomingTarget(rawTarget) {
   return target;
 }
 
+function hasExplicitThreadPrefix(rawTarget) {
+  return String(rawTarget || '').trim().startsWith('thread:');
+}
+
+function normalizeAttachThreadInput(rawTarget) {
+  const original = String(rawTarget || '').trim();
+  if (!original) return '';
+
+  if (hasExplicitThreadPrefix(original)) {
+    throw new Error(
+      `Invalid attach-thread target \"${original}\": Discord writer does not accept thread:ID here. Use the raw thread/channel id or channel:ID instead.`
+    );
+  }
+
+  return normalizeIncomingTarget(original);
+}
+
 function extractJson(output) {
   const t = String(output || '').trim();
   const idx = t.indexOf('{');
@@ -506,12 +523,11 @@ function normalizeDiscordTarget(target) {
   if (!t) return [];
 
   const targets = [t];
-  if (!t.startsWith('channel:') && !t.startsWith('thread:')) {
-    targets.push(`thread:${t}`);
+  if (!t.startsWith('channel:')) {
     targets.push(`channel:${t}`);
   }
 
-  return targets;
+  return uniq(targets);
 }
 
 function isTerminalTargetError(err) {
@@ -683,6 +699,7 @@ Options:
   --workspace <path>                Workspace root (default: ~/.openclaw/workspace)
   --title "..."                     Required only when creating a new thread
   --attach-thread <id>              Post packet into an existing thread instead of creating one
+                                    (use raw id or channel:ID; do not use thread:ID)
   --no-create-thread                Generate artifacts only (no Discord post)
 
   # agent-led overrides (manual where needed)
@@ -730,7 +747,13 @@ function main() {
   const sourceThread = normalizeIncomingTarget(args['source-thread'] || args.sourceThread);
   let targetForum = normalizeIncomingTarget(args['target-forum'] || args.targetForum);
   const title = args.title;
-  const attachThread = normalizeIncomingTarget(args['attach-thread'] || args.attachThread);
+  let attachThread;
+  try {
+    attachThread = normalizeAttachThreadInput(args['attach-thread'] || args.attachThread);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
   const noCreateThread = Boolean(args['no-create-thread'] || args.noCreateThread);
   const mode = (args.mode || 'continuity').toLowerCase();
   const rawLimit = Number(args.limit || MAX_READ_LIMIT_DEFAULT);
@@ -864,15 +887,7 @@ function main() {
 
   let threadId = attachThread || null;
   if (threadId) {
-    try {
-      threadId = resolveDestinationTarget(threadId);
-    } catch (err) {
-      if (noCreateThread) {
-        throw err;
-      }
-      console.error(`ClawBridge: attach target invalid (${threadId}); creating a new thread instead.`);
-      threadId = null;
-    }
+    threadId = resolveDestinationTarget(threadId);
   }
 
   const createdThread = !threadId && !noCreateThread;
