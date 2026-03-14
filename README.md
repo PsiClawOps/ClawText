@@ -635,6 +635,7 @@ Daily Notes: 11 (11 recent, 0 stale) | Clusters: 8 | MEMORY.md Entries: 34
 - **[AGENT_SETUP.md](./AGENT_SETUP.md)** — Agent-assisted setup workflow
 - **[docs/INGEST.md](./docs/INGEST.md)** — Bulk ingest sources, multi-source setup, deduplication
 - **[docs/OPERATIONAL_LEARNING.md](./docs/OPERATIONAL_LEARNING.md)** — Operational lane design, capture policy, review/promotion
+- **[docs/MEMORY_POLICY_TRIGGER_CONTRACT.md](./docs/MEMORY_POLICY_TRIGGER_CONTRACT.md)** — Automatic memory policy, trigger rules, and review boundaries
 - **[docs/CURATION.md](./docs/CURATION.md)** — Promotion, archiving, deduplication pipeline
 - **[SECURITY.md](./SECURITY.md)** — Threat model, controls, trust boundaries
 - **[RISK.md](./RISK.md)** — Operational risk register and mitigations

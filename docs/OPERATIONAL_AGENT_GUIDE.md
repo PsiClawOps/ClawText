@@ -10,6 +10,9 @@ This guide explains when and how to use operational memory CLI commands during a
 
 Operational memory is **not for normal chat**. Use it when you're:
 
+See also: [`MEMORY_POLICY_TRIGGER_CONTRACT.md`](./MEMORY_POLICY_TRIGGER_CONTRACT.md) for the broader ClawText automatic memory contract; this guide is the narrower operational-lane playbook.
+
+
 ✅ **Debugging** — "I got an error", "this isn't working", "fix this bug"  
 ✅ **Using tools** — Tool calls, API calls, function invocations  
 ✅ **Running commands** — Shell commands, npm, yarn, build scripts  

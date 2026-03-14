@@ -17,6 +17,8 @@ ClawText is the unified memory platform for OpenClaw. It captures useful knowled
 
 `MEMORY.md` is not the memory database. It is the smallest, highest-signal curated fast-path artifact.
 
+The behavioral contract for when ClawText should capture, retrieve, review, promote, or ask is documented in [`MEMORY_POLICY_TRIGGER_CONTRACT.md`](./MEMORY_POLICY_TRIGGER_CONTRACT.md).
+
 ## Memory Lanes
 
 ### L1 — Hot Cache

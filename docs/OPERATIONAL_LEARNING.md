@@ -35,6 +35,8 @@ The operational learning lane is no longer just a design draft. Current implemen
 - **user-discretion gated**: review approvals, promotion approvals, cadence approval when needed
 - **backend/admin only**: raw CLI plumbing
 
+See also: [`MEMORY_POLICY_TRIGGER_CONTRACT.md`](./MEMORY_POLICY_TRIGGER_CONTRACT.md) for the higher-level automatic memory contract that governs when ClawText should capture, retrieve, review, promote, or ask.
+
 ### Activation / verification
 This lane depends on ClawText being loaded as a plugin from the canonical path:
 `~/.openclaw/workspace/skills/clawtext`
