@@ -18,6 +18,7 @@
   "scripts": {
     "build": "tsc && node scripts/add-js-extensions.js",
     "dev": "tsc --watch",
+    "extract:buffer": "node scripts/extract-buffer.mjs",
     "breadcrumb:log": "node scripts/log-memory-evolution-breadcrumb.mjs",
     "eval:memory-evolution": "node scripts/eval-memory-evolution.mjs",
     "memory:report": "node scripts/memory-health-report.js"

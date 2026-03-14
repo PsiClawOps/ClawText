@@ -346,6 +346,60 @@ openclaw plugins list          # Should show: clawtext | enabled
 openclaw gateway status        # Should show: running
 ```
 
+### Operator Runbook (Current Working State)
+
+ClawText now has active automation and safety checks. Keep this checklist handy:
+
+```bash
+# 1) Confirm plugin is loaded
+openclaw plugins info clawtext
+
+# 2) Confirm runtime state + hooks are enabled
+openclaw plugins list
+openclaw hooks list
+
+# 3) Confirm cron jobs are present
+openclaw cron list
+
+# 4) Trigger a manual extraction cycle (safe, idempotent)
+# (first grab IDs from `openclaw cron list`)
+openclaw cron run <clawtext-extract-buffer-id> --expect-final
+
+# 5) Trigger an immediate cluster rebuild + RAG validation
+openclaw cron run <clawtext-daily-cluster-rebuild-id> --expect-final
+
+# 6) Run maintenance sweep manually
+openclaw cron run <clawtext-operational-maintenance-id> --expect-final
+```
+
+**Expected health checks after each run**:
+- New `memory/YYYY-MM-DD.md` entries appear when extraction finds new records
+- `extract-state.json` updates in `state/clawtext/prod/ingest/`
+- `memory/clusters/` (and/or state-backed cluster artifacts) refresh
+- No missing-thread/source-loss in `openclaw status` and no repeated plugin load errors
+
+### Bridge Transfer Safety Smoke Test (Post-Migration)
+
+ClawBridge now supports backup + chunked message verification. Use this checklist after any bridging workflow change:
+
+```bash
+# Create a destination thread once (or pass an existing thread id)
+node repo/clawtext/skills/clawbridge/bin/clawbridge.js extract-discord-thread \
+  --source-thread <source-channel-or-thread-id> \
+  --target-forum <forum-or-channel-id> \
+  --title "ClawBridge smoke test" \
+  --mode continuity \
+  --limit 10 \
+  --attach-thread <existing-thread-id>
+
+# Verify outputs:
+# 1) destination thread has init + short/full/bootstrap posts with unique message IDs
+# 2) backup exists:
+ls -la memory/bridge/backups/clawbridge/
+# 3) backup manifest + source-messages snapshot contain source/thread metadata
+cat memory/bridge/backups/clawbridge/<stamp>_<source>/backup-manifest.json
+```
+
 ### Updates
 
 ```bash

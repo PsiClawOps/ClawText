@@ -2,7 +2,10 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
+
+const DISCORD_MAX_CHUNK = 1800;
+const SEND_RETRIES = 2;
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -50,7 +53,9 @@ function asArray(v) {
 function extractJson(output) {
   const t = String(output || '').trim();
   const idx = t.indexOf('{');
-  if (idx === -1) throw new Error('No JSON object found in command output');
+  if (idx === -1) {
+    throw new Error('No JSON object found in command output');
+  }
   const candidate = t.slice(idx);
   return JSON.parse(candidate);
 }
@@ -61,6 +66,19 @@ function runOpenclaw(args) {
     maxBuffer: 10 * 1024 * 1024,
   });
   return extractJson(out);
+}
+
+function assertCommandSuccess(payload, context = '') {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error(`Invalid OpenClaw response object for ${context}`);
+  }
+
+  if (payload.error || payload.ok === false || payload.success === false) {
+    const details = payload.error || payload.message || 'OpenClaw returned failure status';
+    throw new Error(`OpenClaw command failed for ${context}: ${details}`);
+  }
+
+  return true;
 }
 
 function nowStamp() {
@@ -83,7 +101,7 @@ function uniq(xs) {
   return out;
 }
 
-function splitForDiscord(text, max = 1800) {
+function splitForDiscord(text, max = DISCORD_MAX_CHUNK) {
   const raw = String(text || '');
   if (raw.length <= max) return [raw];
 
@@ -118,16 +136,49 @@ function splitForDiscord(text, max = 1800) {
 }
 
 function readMessages(sourceThreadId, limit) {
-  const resp = runOpenclaw([
-    'message', 'read',
-    '--channel', 'discord',
-    '--target', `channel:${sourceThreadId}`,
-    '--limit', String(limit),
-    '--json',
-  ]);
+  const id = String(sourceThreadId).trim();
+  const candidates = [id];
+  if (!id.startsWith('channel:') && !id.startsWith('thread:')) {
+    candidates.unshift(`channel:${id}`);
+  }
 
-  const msgs = resp?.payload?.messages || [];
-  return Array.isArray(msgs) ? msgs : [];
+  let lastError = null;
+  let parsedMessages = [];
+
+  for (const target of candidates) {
+    try {
+      const resp = runOpenclaw([
+        'message', 'read',
+        '--channel', 'discord',
+        '--target', target,
+        '--limit', String(limit),
+        '--json',
+      ]);
+
+      assertCommandSuccess(resp, `read source messages (target=${target})`);
+
+      const msgs = resp?.payload?.messages || resp?.messages || [];
+      parsedMessages = Array.isArray(msgs) ? msgs : [];
+      if (parsedMessages.length >= 0) {
+        return parsedMessages;
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      continue;
+    }
+  }
+
+  if (lastError) {
+    throw new Error(`Failed to read source messages from ${sourceThreadId}: ${lastError.message}`);
+  }
+
+  return [];
+}
+
+function safeWrite(filePath, text) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(filePath, text, 'utf8');
 }
 
 function makeArtifacts(args, messages, paths) {
@@ -257,11 +308,11 @@ function makeArtifacts(args, messages, paths) {
     '- ClawBridge role as continuity + transfer layer.',
   ].join('\n');
 
-  fs.writeFileSync(paths.short, short);
-  fs.writeFileSync(paths.full, full);
-  fs.writeFileSync(paths.bootstrap, bootstrap);
+  safeWrite(paths.short, short);
+  safeWrite(paths.full, full);
+  safeWrite(paths.bootstrap, bootstrap);
 
-  return { short, full, bootstrap };
+  return { short, full, bootstrap, artifactCount: { short: short.length, full: full.length, bootstrap: bootstrap.length } };
 }
 
 function createThread(targetForum, title, initMessage) {
@@ -274,23 +325,69 @@ function createThread(targetForum, title, initMessage) {
     '--json',
   ]);
 
+  assertCommandSuccess(resp, 'create thread');
   const thread = resp?.payload?.thread || resp?.thread || {};
   const threadId = thread.id;
   if (!threadId) throw new Error('Failed to parse created thread id');
   return threadId;
 }
 
-function sendToThread(threadId, text) {
-  const chunks = splitForDiscord(text, 1800);
-  for (const c of chunks) {
-    runOpenclaw([
-      'message', 'send',
-      '--channel', 'discord',
-      '--target', threadId,
-      '-m', c,
-      '--json',
-    ]);
+function extractMessageId(payload, context) {
+  const candidates = [
+    payload?.payload?.message?.id,
+    payload?.payload?.messageId,
+    payload?.payload?.result?.messageId,
+    payload?.result?.messageId,
+    payload?.result?.id,
+    payload?.message?.id,
+    payload?.id,
+  ];
+
+  const candidate = candidates.find((value) => String(value || '').trim() !== '');
+  if (!candidate) {
+    throw new Error(`No message identifier returned for ${context}`);
   }
+
+  return String(candidate);
+}
+
+function sendChunkToThread(threadId, c, idx) {
+  const resp = runOpenclaw([
+    'message', 'send',
+    '--channel', 'discord',
+    '--target', threadId,
+    '-m', c,
+    '--json',
+  ]);
+  assertCommandSuccess(resp, `send chunk ${idx}`);
+  return extractMessageId(resp, `send chunk ${idx}`);
+}
+
+function sendToThread(threadId, text) {
+  const chunks = splitForDiscord(text, DISCORD_MAX_CHUNK);
+  const messageIds = [];
+
+  for (let i = 0; i < chunks.length; i++) {
+    let attempt = 0;
+    let lastError = null;
+    while (attempt <= SEND_RETRIES) {
+      try {
+        const id = sendChunkToThread(threadId, chunks[i], i + 1);
+        messageIds.push(id);
+        break;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        attempt += 1;
+        if (attempt > SEND_RETRIES) {
+          throw new Error(`Failed chunk ${i + 1}/${chunks.length} after ${SEND_RETRIES + 1} attempts: ${lastError.message}`);
+        }
+        const waitMs = 300 * Math.pow(2, attempt - 1);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+      }
+    }
+  }
+
+  return { count: chunks.length, messageIds };
 }
 
 function maybeIngest(args, fullPath) {
@@ -298,21 +395,49 @@ function maybeIngest(args, fullPath) {
   const ingestCli = path.join(args.workspace, 'skills', 'clawtext', 'bin', 'ingest.js');
   const buildClusters = path.join(args.workspace, 'skills', 'clawtext', 'scripts', 'build-clusters.js');
 
-  execFileSync('node', [
-    ingestCli,
-    'ingest-text',
-    `--input=${fullPath}`,
-    `--project=${args.project || 'clawbridge'}`,
-    `--source=${args.source || 'clawbridge:auto'}`,
-    '--type=continuity-packet',
-    '--verbose',
-  ], { stdio: 'inherit' });
+  execSync(`node ${JSON.stringify(ingestCli)} ingest-text --input=${JSON.stringify(fullPath)} --project=${JSON.stringify(args.project || 'clawbridge')} --source=${JSON.stringify(args.source || 'clawbridge:auto')} --type=continuity-packet --verbose`, {
+    stdio: 'inherit',
+    shell: true,
+  });
 
   if (args.rebuild !== false) {
-    execFileSync('node', [buildClusters, '--force'], { stdio: 'inherit' });
+    execSync(`node ${JSON.stringify(buildClusters)} --force`, { stdio: 'inherit', shell: true });
   }
 
   return { ingested: true };
+}
+
+function writeTransferBackup(args, messages, paths, results) {
+  const backupRoot = path.join(args.workspace, 'memory', 'bridge', 'backups', 'clawbridge');
+  const stamp = nowStamp();
+  const safeSource = String(args.sourceThread).replace(/[^a-zA-Z0-9_-]/g, '_');
+  const backupDir = path.join(backupRoot, `${stamp}_${safeSource}`);
+
+  fs.mkdirSync(backupDir, { recursive: true });
+
+  const backup = {
+    capturedAt: new Date().toISOString(),
+    sourceThread: args.sourceThread,
+    targetForum: args.targetForum,
+    threadId: args.attachThread || null,
+    mode: args.mode,
+    title: args.title || null,
+    createdThread: results.createdThread,
+    destinationThreadId: results.threadId || null,
+    destinationUrl: results.threadUrl || null,
+    sourceMessageCount: messages.length,
+    readLimit: Number(args.limit || 0),
+    artifacts: {
+      short: path.relative(args.workspace, paths.short),
+      full: path.relative(args.workspace, paths.full),
+      bootstrap: path.relative(args.workspace, paths.bootstrap),
+    },
+    postResults: results.postResults,
+  };
+
+  safeWrite(path.join(backupDir, 'backup-manifest.json'), `${JSON.stringify(backup, null, 2)}\n`);
+  safeWrite(path.join(backupDir, 'source-messages.json'), `${JSON.stringify(messages, null, 2)}\n`);
+  return backupDir;
 }
 
 function showHelp() {
@@ -408,6 +533,8 @@ function main() {
     sourceThread,
     targetForum,
     title,
+    mode,
+    limit,
   };
 
   const messages = readMessages(sourceThread, limit);
@@ -423,41 +550,71 @@ function main() {
     `- ${path.relative(workspace, paths.bootstrap)}`,
   ].join('\n');
 
+  const postResults = {
+    init: null,
+    short: null,
+    full: null,
+    bootstrap: null,
+    attached: false,
+  };
+
   let threadId = attachThread || null;
   const createdThread = !threadId && !noCreateThread;
   if (createdThread) {
     threadId = createThread(targetForum, title, initMsg);
+    postResults.init = true;
   }
 
   if (threadId) {
-    if (!createdThread) {
-      sendToThread(threadId, initMsg);
-    }
+    try {
+      if (!createdThread) {
+        postResults.init = sendToThread(threadId, initMsg);
+      }
 
-    if (mode !== 'memory') {
-      sendToThread(threadId, `## SHORT HANDOFF\n\n${artifacts.short}`);
-      sendToThread(threadId, `## FULL CONTINUITY PACKET\n\n${artifacts.full}`);
-      sendToThread(threadId, `## NEXT-AGENT BOOTSTRAP\n\n${artifacts.bootstrap}`);
-    } else {
-      sendToThread(threadId, `## MEMORY-PROMOTION CANDIDATE\n\n${artifacts.full}`);
+      if (mode !== 'memory') {
+        postResults.short = sendToThread(threadId, `## SHORT HANDOFF\n\n${artifacts.short}`);
+        postResults.full = sendToThread(threadId, `## FULL CONTINUITY PACKET\n\n${artifacts.full}`);
+        postResults.bootstrap = sendToThread(threadId, `## NEXT-AGENT BOOTSTRAP\n\n${artifacts.bootstrap}`);
+      } else {
+        postResults.bootstrap = null;
+        postResults.full = sendToThread(threadId, `## MEMORY-PROMOTION CANDIDATE\n\n${artifacts.full}`);
+      }
+      postResults.attached = true;
+    } catch (err) {
+      // Bubble up hard so the cron/agent has explicit failure
+      throw new Error(`Post failure to destination thread ${threadId}: ${err.message}`);
     }
   }
 
-  if (args.ingest) maybeIngest({ ...args, workspace }, paths.full);
+  const ingestResult = args.ingest ? maybeIngest({ ...args, workspace }, paths.full) : { ingested: false };
 
-  const guild = args['guild-id'] || args.guildId || '1474997926919929927';
-  const url = threadId ? `https://discord.com/channels/${guild}/${targetForum}/${threadId}` : null;
+  const results = {
+    createdThread,
+    threadId,
+    threadUrl: threadId ? `https://discord.com/channels/${args['guild-id'] || args.guildId || '1474997926919929927'}/${targetForum}/${threadId}` : null,
+    mode,
+    postResults,
+    artifacts,
+    ingested: ingestResult.ingested,
+    ok: true,
+  };
+
+  const backupDir = writeTransferBackup({ ...args, workspace, sourceThread, targetForum, mode }, messages, paths, {
+    createdThread,
+    threadId,
+    threadUrl: results.threadUrl,
+    postResults,
+  });
 
   console.log(JSON.stringify({
-    ok: true,
-    mode,
-    threadId,
-    threadUrl: url,
-    createdThread,
-    posted: Boolean(threadId),
-    artifacts: paths,
-    ingested: Boolean(args.ingest),
+    ...results,
+    backupDir,
   }, null, 2));
 }
 
-main();
+try {
+  main();
+} catch (err) {
+  console.error(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }, null, 2));
+  process.exit(1);
+}
