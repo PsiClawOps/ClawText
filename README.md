@@ -1,335 +1,142 @@
-# ClawText — Comprehensive Memory Platform for OpenClaw
+# ClawText — Memory, Recall, and Continuity for OpenClaw
 
-**Version:** 1.5.0 | **Status:** Production | **Type:** OpenClaw Skill/Plugin
+**Product:** ClawText | **Status:** Production-capable runtime with 2.0 claim-boundary documentation | **Repository:** https://github.com/ragesaq/clawtext
 
-> A complete knowledge lifecycle system — capturing, ingesting, retrieving, curating, and actively learning from patterns to make your agents more capable and resilient over time.
-
----
-
-## How Memory Works in Agent Systems
-
-### The Problem
-
-Every time an LLM processes a request, it builds a prompt from three layers:
-
-1. **System instructions** — Core rules and identity (SOUL.md, AGENTS.md, USER.md in OpenClaw)
-2. **Context** — Background information to inform the response
-3. **Current request** — What you're asking right now
-
-Without persistent memory, the context layer is empty. Every session starts from zero:
-
-```
-Session 1:
-[System] + [CONTEXT: EMPTY] + "Where was Caesar's greatest military victory?"
-→ Response: "Battle of Alesia in 52 BC"
-
-Session 2 (new conversation):
-[System] + [CONTEXT: EMPTY] + "Who was that guy he defeated in that battle you told me about yesterday?"
-→ Response: "What battle? I don't have any context from our previous conversation."
-
-With a memory system:
-[System] + [CONTEXT: Battle of Alesia, Caesar's military history] + "Who was that guy he defeated?"
-→ Response: "Vercingetorix, the Gallic chieftain. That victory at Alesia was decisive because..."
-```
-
-Memory systems fill that context layer with information that persists across sessions. The agent remembers previous conversations, decisions, and can build on past work rather than relearning the same things.
-
-### OpenClaw's Built-In Memory
-
-OpenClaw agents already have basic memory through `MEMORY.md` — a static file for recording decisions and facts. It works for small projects. It doesn't scale. It requires manual maintenance and can't grow beyond a few hundred entries.
-
-**ClawText doesn't replace `MEMORY.md`; it complements it.** MEMORY.md stays high-signal and hand-curated. ClawText handles the dynamic, scalable parts: conversational captures, bulk imports, tiered retrieval, automatic maintenance, and learned patterns from failures.
+ClawText gives OpenClaw agents durable, file-first memory behavior with explicit operational boundaries.
+It captures context, retrieves what matters for the next prompt, and preserves continuity across threads, while avoiding the common problem of “context drift” between sessions.
 
 ---
 
-## What Is ClawText?
+## The problem we solve
 
-ClawText is a knowledge lifecycle system with three integrated lanes:
+LLM agents in real workflows do not operate in one long conversation.
+They switch tasks, threads, and sessions, then re-decide from low-fidelity context.
+The result is repeated mistakes, lost continuity, and manual re-explanation.
 
-| Lane | What It Does |
-|------|-------------|
-| **Working Memory** | Captures conversation context automatically. Tiered retrieval injects the right memories at prompt time. |
-| **Knowledge Ingest** | Bulk-loads repos, docs, Discord forums/threads, exports, and other structured knowledge sources. Queryable on-demand. |
-| **Operational Learning** | Captures tool failures and recurring errors. Reviews patterns with agents. Promotes stable lessons into durable guidance. |
+ClawText prevents this with an explicit memory lifecycle:
 
----
+- conversation is captured automatically,
+- knowledge is ingested and indexed for retrieval,
+- operational signals are reviewed and promoted,
+- continuity handoff artifacts are generated for safe transitions.
 
-## What's New in v1.4.0
-
-### Automatic Memory Pipeline
-
-ClawText now runs a three-stage pipeline automatically:
-
-1. **Extraction (every 20 min)** — Messages captured to `state/clawtext/prod/ingest/extract-buffer.jsonl`, then extracted facts/decisions/learnings written to `memory/YYYY-MM-DD.md` using LLM
-2. **Clustering (nightly)** — Daily 2am UTC cron rebuilds semantic clusters from daily memories, validates RAG quality, notifies if confidence < 70%
-3. **Injection (every prompt)** — `before_prompt_build` hook injects top 5 relevant memories (by BM25 + semantic similarity) automatically — zero latency (~1ms), token-budgeted, confidence-filtered
-
-**Result:** You get context-aware responses without manual memory searches. All memories are discoverable via `memory_search` as well.
-
-### Bundled Ingest Engine
-
-Knowledge ingest engine is now fully bundled into ClawText (previously separate `clawtext-ingest` package). Supports Discord, repos, docs, JSON, and more — all in one install.
-
-### State Root Adoption
-
-Runtime-generated state now lives under `~/.openclaw/workspace/state/clawtext/prod/`:
-- Cluster indices
-- Evaluation metrics
-- Extraction checkpoints
-
-This keeps the repo clean and separates sources (git-tracked) from runtime state (not git-tracked).
+So when context is needed, it is delivered as a curated, bounded, auditable packet rather than an unbounded blob.
 
 ---
 
-## What's New in v1.5.0
+## What is in the ClawText 2.0 scope (claim-safe)
 
-### Lightweight Relationship Tracking
+The repository now defines a **2.0 claim boundary** and we recommend writing public positioning strictly within it.
 
-v1.5 adds explicit, human-readable relationship tracking for grouping and cross-referencing related memories, patterns, and decisions.
+### ✅ We can safely claim
+- plugin loads and works in OpenClaw
+- automatic capture-to-memory pipeline is operating (capture → extract → daily memory/writeback)
+- retrieval/recall pipeline is active (ranking, merge, prompt injection)
+- continuity artifact generation is reliable (`handoff`, `full continuity`, `bootstrap`, backups, manifests)
+- operational learning loop works (`capture → recurrence → review → promote → retrieve`)
+- bounded continuity safety is enforced:
+  - preflight/estimate before runs,
+  - chunk budget checks,
+  - explicit oversized-run behavior unless override is used,
+  - backup + source snapshot persisted with each continuity transfer
 
-**Why relationships matter:**
-- **Grouped discovery** — "Show me all RGCS quaternion issues" returns a logical group, not scattered search results
-- **Cross-project tracking** — Explicit links show how changes in one project affect others (e.g., RGCS VR tracking → Lumbot voice latency)
-- **Decision trees** — Complex decisions can reference their dependencies and cascading impacts
-- **Agent-maintainable** — Pure YAML, no database, human-readable
+### ⚠️ Important limits (don’t overclaim)
+- Existing-thread appends work when destination thread is valid and resolvable; stale/invalid IDs may fail.
+- ClawText owns context creation and continuity packaging; it does **not** claim full ownership of all Discord transport semantics.
+- Relationship support is useful but lightweight; it is not a full graph-native retrieval engine.
+- Retrieval quality is continuously improving; it is operationally useful, not mathematically perfect.
 
-**Structure:** `memory/clusters/relationships.yaml` (optional, maintained by agents or humans)
-
-```yaml
-shortcuts:
-  - name: "RGCS Quaternion Issues"
-    connects:
-      - "anti-pattern:quaternion-double-normalize"
-      - "recovery-pattern:NaN-edge-case-fix"
-      - "decision:RGCS-OneEuro-filter-params"
-
-edges:
-  - type: "causes"
-    from: "anti-pattern:quaternion-double-normalize"
-    to: "error-pattern:NaN-in-quaternion-math"
-    confidence: 0.92
-```
-
-**Agent workflow:** Weekly relationship review (15 min) keeps relationships fresh, promotes new connections, archives dormant ones. See `HEARTBEAT.md` and `AGENT_CLAWTEXT_BEST_PRACTICES.md` for details.
-
-**Best for:**
-- Complex operational patterns
-- Cross-project dependencies
-- Decision rationale chains
-- Known recurring issues that need quick grouping
-
-Relationships are *optional* — the system works great without them. But they become valuable as your memory grows and you want explicit structure beyond semantic similarity.
+For the formal boundary, see: [`docs/CLAWTEXT_2_0_SUPPORTED_BEHAVIOR_AND_LIMITATIONS.md`](./docs/CLAWTEXT_2_0_SUPPORTED_BEHAVIOR_AND_LIMITATIONS.md)
 
 ---
 
-## Three Lanes in Depth
+## Product architecture (2.0 view)
 
-### Lane 1: Working Memory
+ClawText is implemented as three operational lanes:
 
-Captures from conversations and stores them in a tiered system. Memory doesn't just sit there — the system actively retrieves and injects the most relevant items at prompt time.
+| Lane | Responsibility | Why it matters |
+|---|---|---|
+| **Working Memory** | Capture, rank, and inject relevant context into prompts | Improves continuity and response quality in active sessions |
+| **Knowledge Ingest** | Import docs/repos/Discord data and keep it searchable | Expands recall without flooding every prompt |
+| **Operational Learning** | Learn from failures, patterns, and reviewed recoveries | Improves agent reliability over time |
 
-```
-Conversation captures
-       ↓
-Conversational → Raw staging buffer (L4)
-       ↓ review/promotion
-Gets validated, ranked, deduped
-       ↓
-Full history searchable (L3)
-       ↓ hot-admitted by relevance score
-Curated, indexed memories (L2)
-       ↓ selected, injected into prompt
-Fast retrieval (~1ms) (L1)
-```
+```text
+Message stream
+  ├─> Staging / buffer
+  ├─> extraction + de-dup
+  ├─> daily memory + cluster rebuild
+  ├─> hot recall / ranked recall
+  └─> prompt injection (token budget controlled)
 
-**Key properties:**
-- **BM25 scoring** — term frequency + confidence weighting + project-aware ranking
-- **Semantic clustering** — memories grouped by topic, not just timestamp
-- **Deduplication** — SHA1 hashing prevents re-storing duplicate knowledge
-- **Token budgeting** — never exceeds your configured prompt context budget
-- **Sticky retention** — high-value memories stay readily available longer
-
-#### How Conversation Capture Works
-
-ClawText automatically captures all conversation context (incoming and outgoing messages) without any action on your part.
-
-**The pipeline (fully automatic):**
-
-```
-Every message event (in/out)
-       ↓
-[clawtext-extract hook] — appends to buffer (zero-LLM-cost)
-       ↓ (asynchronous)
-state/clawtext/prod/ingest/extract-buffer.jsonl (rolling 24h buffer)
-       ↓ every 20 minutes
-[Extraction cron] — LLM extracts facts, decisions, learnings
-       ↓
-Memory/YYYY-MM-DD.md (YAML-formatted daily memories)
-       ↓ triggered if 3+ extracted
-[Cluster rebuild] — semantic grouping, dedup, indexing
-       ↓
-Hot cache + RAG injection
-       ↓
-Injected automatically into next prompt (~1ms latency)
+Discord continuity flow
+  ├─> estimate/guardrail
+  ├─> handoff/full/bootstrap packet
+  ├─> backup + manifest
+  └─> bounded execution + visible failure behavior
 ```
 
-**Key points:**
-- **Hook runs on every message** — captures both you and the agent
-- **Zero cost at capture time** — just appends JSON lines to a buffer file
-- **Automatic extraction every 20 minutes** — background cron processes the buffer
-- **Session flush on `/new`** — if you start a fresh conversation, the current buffer drains immediately so nothing is lost
-- **Daily rebuild at 2am UTC** — full cluster rebuild + quality validation
-- **Format stored** — JSONL in buffer, then YAML in daily memory files:
-
-```yaml
-# Example extracted memory
-- id: mem_20260310_001
-  timestamp: 2026-03-10T09:02:00Z
-  type: decision
-  topic: ClawText
-  content: "Decided to bundle clawtext-ingest into main package for unified installation story"
-  confidence: 0.95
-  project: openclaw
-```
-
-**You don't need to do anything.** Conversation capture is always on. The system handles extraction, clustering, deduplication, and injection automatically.
+The key design choice is **file-first + explicit boundaries**:
+- state is root-owned for runtime artifacts,
+- outputs are plain files for auditability,
+- critical behavior is controlled by explicit thresholds rather than hidden defaults.
 
 ---
 
-### Lane 2: Knowledge Ingest
+## What’s changed recently
 
-Bulk-loads external knowledge sources into a searchable base kept separate from working memory. Why separate? Injecting a 500KB codebase into every prompt wastes tokens and confuses the LLM. Knowledge repos live separately — your agent queries them on-demand when it needs specifics.
+### v1.5.0 (current runtime baseline)
+- added lightweight relationship support via `memory/clusters/relationships.yaml`
+- stabilized operational review/maintenance cadence and curation workflow
+- integrated continuity safety checks for bounded handoff behavior
+- standardized release-boundary docs for what to claim vs what to defer
 
-**Supported sources:**
-- GitHub repos and local code directories
-- Markdown/documentation folders
-- Discord forums, channels, and threads (with full conversation hierarchy)
-- JSON exports from any source
-- Raw text and structured data
+### Operationally useful 2.0 workstreams
+- canonical plugin install stories (published + linked dev install)
+- explicit runtime state-root conventions
+- reliability-focused continuity pipeline (estimate first, backups, manifests)
+- documented release boundaries to keep positioning technically honest
 
+### In progress / post-2.0 direction
+- deeper graph-native retrieval,
+- further retrieval quality hardening,
+- ongoing public-facing docs refinement and examples.
+
+---
+
+## Quickstart
+
+### 1) Install (canonical)
 ```bash
-# Ingest a Discord forum
-npm run ingest:discord -- --forum-id 123456789 --mode batch --verbose
-
-# Ingest a folder of docs
-clawtext-ingest ingest-files --input="docs/**/*.md" --project=myproject
-
-# Ingest a full codebase
-clawtext-ingest ingest-files --input="src/**/*.{ts,js}" --project=myapp
-
-# Check knowledge repo freshness
-npm run knowledge:status
-# → 🟢 fresh (<30d) | 🟡 aging (30-90d) | 🔴 stale (>90d)
-```
-
-Knowledge repos are automatically tracked for staleness. The system alerts you (and agents) when imports need refreshing.
-
----
-
-### Lane 3: Operational Learning
-
-The system learns from its own operational history. When tools fail or commands error, the system captures it. If the same error recurs, it becomes a pattern. Agents review the pattern, decide if it's useful, and promote stable lessons into durable guidance.
-
-**Lifecycle:**
-
-```
-Tool/command fails or hook fires
-          ↓
-    [Capture: raw]     ← automatic, no action needed
-          ↓ recurs N times
-    [Candidate]        ← pattern promoted when it repeats
-          ↓ agent-led review
-    [Reviewed]
-      ↙         ↘
-  reject       approve
-    ↓              ↓
- Archived    Ready for promotion
-                   ↓
-    Agent proposes target + user confirms
-                   ↓
-           ┌──────────────────┐
-           │ Durable Guidance │
-           │ SOUL.md          │
-           │ AGENTS.md        │
-           │ TOOLS.md         │
-           │ project docs     │
-           └──────────────────┘
-```
-
-**What gets captured:**
-- Tool failures (automatic via hooks)
-- Command/script failures
-- Repeated error patterns
-- Successful recovery patterns
-- Optimization discoveries
-
-**Why this matters:**
-Most memory systems optimize for prompt efficiency — faster retrieval, better token use, cleaner context injection. Operational learning goes further: it makes the *system itself* more reliable. Recurring failures become reviewed guidance. Agent and system both learn from the same operational history. Over time, the system gets more robust and self-healing.
-
----
-
-## Safety and Quality Model
-
-ClawText is designed to avoid the two biggest memory failures:
-
-1. **Storing things that should never be stored**
-2. **Retrieving things that should never be injected**
-
-Current controls include:
-
-- **Hygiene patterns** for secrets and credentials
-- **Raw-log detection** to keep pasted logs/tool dumps out of clusters
-- **Anti-pattern walls** to block false associations
-- **Token budgeting** for prompt injection
-- **Approval-gated promotion** for durable operational guidance
-- **File-based auditability** instead of hidden database state
-
-See [SECURITY.md](./SECURITY.md) and [RISK.md](./RISK.md) for detailed threat models.
-
----
-
-## Installation
-
-### Canonical Install Flows
-
-ClawText has two canonical installation stories:
-
-#### 1) Published / user install
-
-```bash
+# recommended
 openclaw plugins install @openclaw/clawtext
-```
 
-Use this for normal users and production workspaces.
-
-#### 2) Local development install
-
-```bash
+# local dev
 openclaw plugins install --link /path/to/clawtext
 ```
 
-Use this when developing ClawText locally and you want OpenClaw to load the repo directly through the plugin installer.
+`~/.openclaw/workspace/skills/clawtext` can exist as an alias/convenience path if present, but the canonical install contract is plugin-manager install/linked install.
 
-### What is canonical vs non-canonical?
+### 2) Verify runtime
+```bash
+openclaw plugins list
+openclaw hooks list
+openclaw cron list
+```
 
-- ✅ **Canonical:** `openclaw plugins install @openclaw/clawtext`
-- ✅ **Canonical:** `openclaw plugins install --link /path/to/clawtext`
-- ⚠️ **Non-canonical alias:** `~/.openclaw/workspace/skills/clawtext` if present as a linked/alias path
-- 🚑 **Recovery-only:** manual `plugins.load.paths` editing in `~/.openclaw/openclaw.json`
+Expect `clawtext` plugin enabled and its hooks/crons visible.
 
-If `workspace/skills/clawtext` exists in your workspace, treat it as an implementation detail or alias created around the installer-managed flow — **not** the primary install story.
+### 3) Confirm memory pipeline
+```bash
+# manual extraction/rebuild path is implementation-specific; validate per your environment
+# (safe, idempotent commands are listed in AGENT_SETUP.md)
 
-### What `openclaw plugins install` Does
+node scripts/build-clusters.js --force
+node scripts/validate-rag.js
+node scripts/operational-cli.mjs status
+```
 
-- ✅ Installs or links ClawText through OpenClaw's plugin manager
-- ✅ Creates/updates the install record in `plugins.installs`
-- ✅ Handles dependency installation and plugin registration
-- ✅ Enables the plugin automatically
-- ✅ Keeps the install provenance visible to OpenClaw
-
-### Configuration
-
-After installation, customize memory behavior in `~/.openclaw/openclaw.json`. The defaults (5 memories, 0.70 confidence, 2000 tokens) work for most workflows:
+### 4) Configure
+Tune memory recall and gating in `~/.openclaw/openclaw.json`:
 
 ```json
 {
@@ -352,356 +159,89 @@ After installation, customize memory behavior in `~/.openclaw/openclaw.json`. Th
 }
 ```
 
-**Tuning:** Need tighter token budget? Use `maxMemories: 3, minConfidence: 0.80` (conservative). Want maximum context? Use `maxMemories: 10, minConfidence: 0.50` (aggressive). See [AGENT_SETUP.md](./AGENT_SETUP.md) for full tuning guide.
+Common adjustments:
+- safer defaults: lower `maxMemories` and raise `minConfidence`
+- wider recall: increase `maxMemories`, lower `minConfidence`
 
-Then restart:
-
-```bash
-openclaw gateway restart
-```
-
-### Verify Installation
-
-```bash
-openclaw plugins list          # Should show: clawtext | enabled
-openclaw gateway status        # Should show: running
-```
-
-### Operator Runbook (Current Working State)
-
-ClawText now has active automation and safety checks. Keep this checklist handy:
-
-```bash
-# 1) Confirm plugin is loaded
-openclaw plugins info clawtext
-
-# 2) Confirm runtime state + hooks are enabled
-openclaw plugins list
-openclaw hooks list
-
-# 3) Confirm cron jobs are present
-openclaw cron list
-
-# 4) Trigger a manual extraction cycle (safe, idempotent)
-# (first grab IDs from `openclaw cron list`)
-openclaw cron run <clawtext-extract-buffer-id> --expect-final
-
-# 5) Trigger an immediate cluster rebuild + RAG validation
-openclaw cron run <clawtext-daily-cluster-rebuild-id> --expect-final
-
-# 6) Run maintenance sweep manually
-openclaw cron run <clawtext-operational-maintenance-id> --expect-final
-```
-
-**Expected health checks after each run**:
-- New `memory/YYYY-MM-DD.md` entries appear when extraction finds new records
-- `extract-buffer.jsonl` and `extract-state.json` update in `state/clawtext/prod/ingest/`
-- `memory/clusters/` (and/or state-backed cluster artifacts) refresh
-- No missing-thread/source-loss in `openclaw status` and no repeated plugin load errors
-
-### Bridge Transfer Safety Smoke Test (Post-Migration)
-
-ClawBridge now supports backup + chunked message verification. Use this checklist after any bridging workflow change:
-
-```bash
-# Create a destination thread once (or pass an existing thread id)
-clawbridge-safe \
-  --source-thread <source-channel-or-thread-id> \
-  --target-forum <forum-or-channel-id> \
-  --title "ClawBridge smoke test" \
-  --mode continuity \
-  --limit 10 \
-  --attach-thread <existing-thread-id>
-
-# Legacy direct invocation:
-# node repo/clawtext/skills/clawbridge/bin/clawbridge.js extract-discord-thread \
-#   --source-thread <source-channel-or-thread-id> \
-#   --target-forum <forum-or-channel-id> \
-#   --title "ClawBridge smoke test" \
-#   --mode continuity \
-#   --limit 10 \
-#   --attach-thread <existing-thread-id>
-
-# Verify outputs:
-# 1) destination thread has init + short/full/bootstrap posts with unique message IDs
-# 2) backup exists:
-ls -la memory/bridge/backups/clawbridge/
-# 3) backup manifest + source-messages snapshot contain source/thread metadata
-cat memory/bridge/backups/clawbridge/<stamp>_<source>/backup-manifest.json
-```
-
-### Updates
-
-```bash
-openclaw plugins update clawtext      # Single plugin
-openclaw plugins update --all         # All plugins
-```
-
-### Migrating from Older Versions
-
-See [AGENT_SETUP.md → Migration](./AGENT_SETUP.md#migration-path-from-git-clone-to-plugin-system) for agent-led or manual upgrade paths (preserves all memory).
-
-### Development / Local Setup
-
-For development or modification, use the plugin manager's link flow:
-
-```bash
-openclaw plugins install --link /path/to/clawtext
-```
-
-Example:
-
-```bash
-git clone https://github.com/ragesaq/clawtext.git
-cd clawtext
-npm install
-npm run build
-openclaw plugins install --link .
-```
-
-### Manual `plugins.load.paths` Editing
-
-Manual `plugins.load.paths` editing is **not** the primary install path anymore.
-
-Only use it as a recovery/debug fallback if:
-- the installer metadata is broken,
-- you are repairing a damaged local workspace,
-- or you are diagnosing OpenClaw plugin resolution issues.
-
-If you do use manual load paths for recovery, return to an installer-managed or installer-linked setup afterward.
-
-### Agent-Assisted Setup
-
-If you prefer guided setup (configuration tuning, initial knowledge ingest, etc.), ask an agent:
-
-```
-Help me set up ClawText: install, configure memory search, 
-run a health check, and ingest [my docs/Discord/repo].
-```
-
-Agents follow [AGENT_SETUP.md](./AGENT_SETUP.md) and handle everything end-to-end.
+Restart OpenClaw after config changes (`openclaw gateway restart`).
 
 ---
 
-## Architecture
+## Operational workflow (what you actually use)
 
-```
-Installer-managed extension or linked repo   ← canonical runtime ownership
-│
-├── openclaw.plugin.json   ← plugin manifest
-├── SKILL.md               ← skill definition
-├── AGENT_INSTALL.md       ← agent-friendly activation guide
-├── AGENT_SETUP.md         ← agent-assisted setup workflow
-│
-├── src/
-│   ├── index.ts           ← plugin entry
-│   ├── plugin.ts          ← OpenClaw plugin wiring
-│   ├── rag.ts             ← retrieval engine (BM25, clustering)
-│   ├── hot-cache.ts       ← L1 cache
-│   ├── memory.ts          ← L2/L3 memory management
-│   ├── ingest/            ← bundled ingest engine
-│   │   ├── index.js       ← ClawTextIngest class
-│   │   ├── agent-runner.js
-│   │   └── adapters/
-│   │       └── discord.js ← multi-source adapter
-│   ├── operational.ts     ← operational memory store
-│   ├── operational-capture.ts
-│   ├── operational-aggregation.ts
-│   ├── operational-retrieval.ts
-│   ├── operational-review.ts
-│   ├── operational-promotion.ts
-│   └── operational-maintenance.ts
-│
-├── bin/
-│   ├── ingest.js          ← clawtext-ingest CLI
-│   └── discord.js         ← clawtext-ingest-discord CLI
-│
-├── scripts/               ← agent-owned backend commands
-│   ├── operational-cli.mjs
-│   ├── health-report.mjs
-│   ├── review-digest.mjs
-│   ├── ingest-all.mjs
-│   ├── build-clusters.js
-│   └── validate-rag.js
-│
-└── docs/
-    ├── ARCHITECTURE.md
-    ├── INGEST.md
-    ├── OPERATIONAL_LEARNING.md
-    └── ...
-```
+### Daily memory capture
+- every message event is captured to a staging buffer,
+- periodic extraction writes structured memory files,
+- cluster rebuild and quality validation run on schedule.
 
-**Runtime note:** if you see `~/.openclaw/workspace/skills/clawtext`, treat it as a linked alias or workspace convenience path, not the canonical install contract. The canonical contract is installer-managed (`plugins.installs`) or installer-linked (`openclaw plugins install --link ...`).
+### Knowledge import
+- ingest docs/repos/Discord exports into structured source packs,
+- keep source history in versioned artifact paths.
+
+### Learning feedback loop
+- repeated operation signals are surfaced,
+- candidates are reviewed before promotion,
+- approved guidance is preserved as durable instructions.
+
+### Continuity transfers
+- ClawText ships bounded handoff/bootstrap packet generation,
+- outputs are visible artifacts (`docs/handoffs/*`, `docs/bootstrap/*`, `memory/bridge/backups/*`),
+- execution failures are explicit so agents can recover without silent loss.
 
 ---
 
-## Deployment
+## Documentation map
 
-### Single-Node (Current, Recommended)
+**Start here (what most people need):**
+- [`docs/CLAWTEXT_2_0_RELEASE_DEFINITION.md`](./docs/CLAWTEXT_2_0_RELEASE_DEFINITION.md) — scope/in-scope vs out-of-scope
+- [`docs/CLAWTEXT_2_0_SUPPORTED_BEHAVIOR_AND_LIMITATIONS.md`](./docs/CLAWTEXT_2_0_SUPPORTED_BEHAVIOR_AND_LIMITATIONS.md) — claim-safe release boundary
+- [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) — pipeline and lane model
+- [`docs/INGEST.md`](./docs/INGEST.md) — source ingest design and behavior
+- [`docs/OPERATIONAL_LEARNING.md`](./docs/OPERATIONAL_LEARNING.md) — capture → review → promotion
+- [`docs/PROJECT_DOCS_SCHEMA.md`](./docs/PROJECT_DOCS_SCHEMA.md) — repository-first docs and release schema
 
-All agents share `~/.openclaw/workspace/memory/`. File-based, automatically synchronized. No coordination overhead needed.
-
-**Covers 99% of real deployments.** One machine, many agents, shared memory.
-
-### Multi-Node (Future)
-
-Each Gateway would have isolated memory. If you scale to multiple Gateways, add a sync layer: shared filesystem, central DB, Git-based sync, or S3-compatible storage. This is not v1.4 scope.
-
----
-
-## Tuning
-
-ClawText works out of the box. If you want to tune:
-
-### Hot Cache Admission
-
-In `src/hot-cache.ts`:
-
-```javascript
-admissionConfidence: 0.60,  // Min confidence to enter cache (0.0–1.0)
-admissionScore: 0.8,        // Min BM25 score to enter cache
-maxItems: 300,              // Max items in cache
-defaultTtlDays: 14,         // Days before memory expires
-stickyTtlDays: 60,          // Days before high-confidence memory expires
-```
-
-**When to adjust:**
-- Hit rate dropping → lower thresholds
-- Cache filling with noise → raise thresholds
-
-### Monitor & Maintain
-
-**Memory Health Report** (New in v1.6.0):
-```bash
-npm run memory:report
-# or: clawtext memory report
-
-# Output:
-# - Overall health score (0-100, A-F grade)
-# - Metrics: total memories, daily notes, clusters
-# - Critical/Medium/Low priority issues
-# - Recent activity summary
-# - Cluster status
-# - Recommended actions
-```
-
-**Example Output:**
-```
-================================================================================
-MEMORY SYSTEM HEALTH REPORT
-Generated: 2026-03-13T10:07:09.571Z
-================================================================================
-
-📊 OVERALL HEALTH
-Score: 90/100 (Grade: A)
-
-📈 METRICS
-Total Memories: 15,883 words | Total Lines: 2,373
-Daily Notes: 11 (11 recent, 0 stale) | Clusters: 8 | MEMORY.md Entries: 34
-
-🟡 MEDIUM PRIORITY
-⚡ MEMORY.md contains outdated workspace paths
-   Action: Run path update script or manual find/replace
-
-🎯 RECOMMENDED ACTIONS
-1. Update workspace paths in MEMORY.md
-```
-
-**Promotion Workflow Integration:**
-- Run weekly (part of HEARTBEAT.md checklist)
-- Review stale notes → promote to MEMORY.md or archive
-- Address critical gaps immediately
-- Track system health over time
-
-**Target Metrics:**
-- Health score: **>85** (Grade B or better)
-- Hit rate: **>95%**
-- Stale notes: **0** (all reviewed within 7 days)
-- Cluster freshness: **<14 days**
+**Operational playbooks:**
+- [`AGENT_INSTALL.md`](./AGENT_INSTALL.md)
+- [`AGENT_SETUP.md`](./AGENT_SETUP.md)
+- [`SECURITY.md`](./SECURITY.md)
+- [`RISK.md`](./RISK.md)
 
 ---
 
-## Documentation
+## What ClawText is and isn’t
 
-### For First-Time Users
+### ✅ ClawText is
+- a practical file-based memory system for multi-agent coordination
+- automatically capturing and retrieving memory at prompt time
+- auditable, explicit, and file-visible by design
+- operationally safe by default (token and confidence gates, failure visibility)
 
-- **[SKILL.md](./SKILL.md)** — Formal skill definition (runtime role, ownership model)
-- **[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)** — Memory tiers, retrieval algorithms, performance tuning
-- **[docs/HOT_CACHE.md](./docs/HOT_CACHE.md)** — How fast-path memory injection works
-
-### For Operators & Agents
-
-- **[AGENT_INSTALL.md](./AGENT_INSTALL.md)** — Quick activation guide
-- **[AGENT_SETUP.md](./AGENT_SETUP.md)** — Agent-assisted setup workflow
-- **[docs/INGEST.md](./docs/INGEST.md)** — Bulk ingest sources, multi-source setup, deduplication
-- **[docs/OPERATIONAL_LEARNING.md](./docs/OPERATIONAL_LEARNING.md)** — Operational lane design, capture policy, review/promotion
-- **[docs/MEMORY_POLICY_TRIGGER_CONTRACT.md](./docs/MEMORY_POLICY_TRIGGER_CONTRACT.md)** — Automatic memory policy, trigger rules, and review boundaries
-- **[docs/INTERACTION_OPS_MEMORY_CONTRACT.md](./docs/INTERACTION_OPS_MEMORY_CONTRACT.md)** — How external interaction surfaces (Discord, Clawback app, etc.) feed ClawText memory lanes
-- **[docs/CLAWTEXT_2_0_RELEASE_DEFINITION.md](./docs/CLAWTEXT_2_0_RELEASE_DEFINITION.md)** — Internal definition of what counts as ClawText 2.0 and what is deferred
-- **[docs/CLAWTEXT_2_0_SUPPORTED_BEHAVIOR_AND_LIMITATIONS.md](./docs/CLAWTEXT_2_0_SUPPORTED_BEHAVIOR_AND_LIMITATIONS.md)** — Supported 2.0 behavior and honest release limitations, especially for context delivery
-- **[docs/PROJECT_DOCS_SCHEMA.md](./docs/PROJECT_DOCS_SCHEMA.md)** — Repo-first, ClawDash-compatible documentation schema for GitHub-backed projects
-- **[docs/CURATION.md](./docs/CURATION.md)** — Promotion, archiving, deduplication pipeline
-- **[SECURITY.md](./SECURITY.md)** — Threat model, controls, trust boundaries
-- **[RISK.md](./RISK.md)** — Operational risk register and mitigations
-
-### For Deep Dives
-
-- **[docs/MULTI_AGENT.md](./docs/MULTI_AGENT.md)** — Shared/private memory, agent collaboration
-- **[docs/MEMORY_SCHEMA.md](./docs/MEMORY_SCHEMA.md)** — YAML format, field reference, examples
-- **[docs/ME-001_DURABILITY_CLASSIFIER.md](./docs/ME-001_DURABILITY_CLASSIFIER.md)** — How to score memory durability
-- **[docs/ME-002_SCOPE_ISOLATION_HARDENING.md](./docs/ME-002_SCOPE_ISOLATION_HARDENING.md)** — Cross-project contamination prevention
-- **[docs/ME-003_CONTEXT_LIBRARIAN_CURATION.md](./docs/ME-003_CONTEXT_LIBRARIAN_CURATION.md)** — Curation patterns and heuristics
-- **[docs/ME-004_EVAL_HARNESS.md](./docs/ME-004_EVAL_HARNESS.md)** — Evaluation metrics and quality thresholds
-- **[docs/ADOPTION_PLAN_MEMORY_EVOLUTION.md](./docs/ADOPTION_PLAN_MEMORY_EVOLUTION.md)** — Phased rollout strategy
-- **[docs/ADOPTION_LOG_MEMORY_EVOLUTION.md](./docs/ADOPTION_LOG_MEMORY_EVOLUTION.md)** — Live adoption log with outcomes
-- **[docs/TESTING.md](./docs/TESTING.md)** — Verify installation, run integration tests
-
-### Companion Skills
-
-- **[ClawBridge](https://github.com/ragesaq/clawbridge)** — Thread handoff and continuity transfer (separate repo)
+### ❌ ClawText is not
+- a full hidden long-context replacement
+- a vector-db-first architecture
+- a full execution-layer authority for Discord transport quirks
+- fully autonomous code-rewrite or self-authoring infrastructure
 
 ---
 
-## What ClawText Is & Isn't
-
-### ✅ ClawText IS
-
-- A practical, file-based memory system for multi-agent coordination
-- Fully auditable (no hidden databases)
-- Operationally maintainable (YAML configs, explicit pipelines)
-- Safe by default (token budgeting, confidence thresholds, hygiene patterns)
-- Deployable without external dependencies (no vector DB required)
-
-### ❌ ClawText IS NOT
-
-- A hidden long-context dump
-- A vector-database-first architecture
-- A replacement for human review on risky changes
-- A license to ingest arbitrary untrusted content without controls
-- Self-improving code (v1 focuses on guidance capture, not auto-rewrite)
-
----
-
-## Version History
+## Version history
 
 | Version | What Changed |
-|---------|-------------|
-| **1.5.0** | Lightweight relationship tracking via `relationships.yaml`. Explicit shortcuts for grouping related concepts, edges for dependencies + causation with confidence scoring. Agent-led weekly maintenance workflow. Optional, no setup required. |
-| **1.4.0** | Bundled ingest engine (was separate package). Added operational learning lane: capture, review, promotion, maintenance. Automatic memory pipeline (extraction, clustering, injection). Three-lane knowledge lifecycle complete. |
-| 1.3.0 | Hot cache optimization, BM25 scoring, plugin activation + allowlist story, SKILL.md / AGENT_INSTALL.md |
-| 1.2.0 | Tiered memory (L1–L4), cluster rebuild, validate-rag tooling |
-| 1.1.0 | Initial multi-source ingest, deduplication pipeline |
-| 1.0.0 | Initial release — basic memory injection + retrieval |
+|---|---|
+| **2.0 (release boundary)** | Added explicit claim-safe supported behavior/limitations and public 2.0 publication contract |
+| **1.5.0** | Added lightweight relationship tracking (`relationships.yaml`) and curated review cadence |
+| **1.4.0** | Integrated bundled ingest and operational learning lane |
+| **1.3.0** | Hot cache + plugin activation + policy controls |
+| 1.2.0 | Tiered memory model and cluster rebuild / validation tooling |
+| 1.1.0 | Multi-source ingest + dedup pipeline |
+| 1.0.0 | Initial memory injection + recall loop |
+
+> Note: `2.0` here is a published product boundary and behavior claim package; runtime package version remains `1.5.0` until release/versioning aligns.
 
 ---
-
-## Repository
-
-**https://github.com/ragesaq/clawtext**
 
 ## License
 
 MIT
 
-**Made for OpenClaw.** Designed to be the memory backbone for workspace-wide agent coordination, research, and operational learning.
-ning.
+**Made for OpenClaw.** Designed for reliable agent continuity, practical retrieval, and operational learning.
