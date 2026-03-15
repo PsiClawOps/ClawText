@@ -638,6 +638,7 @@ Daily Notes: 11 (11 recent, 0 stale) | Clusters: 8 | MEMORY.md Entries: 34
 - **[docs/MEMORY_POLICY_TRIGGER_CONTRACT.md](./docs/MEMORY_POLICY_TRIGGER_CONTRACT.md)** — Automatic memory policy, trigger rules, and review boundaries
 - **[docs/INTERACTION_OPS_MEMORY_CONTRACT.md](./docs/INTERACTION_OPS_MEMORY_CONTRACT.md)** — How external interaction surfaces (Discord, Clawback app, etc.) feed ClawText memory lanes
 - **[docs/CLAWTEXT_2_0_RELEASE_DEFINITION.md](./docs/CLAWTEXT_2_0_RELEASE_DEFINITION.md)** — Internal definition of what counts as ClawText 2.0 and what is deferred
+- **[docs/CLAWTEXT_2_0_SUPPORTED_BEHAVIOR_AND_LIMITATIONS.md](./docs/CLAWTEXT_2_0_SUPPORTED_BEHAVIOR_AND_LIMITATIONS.md)** — Supported 2.0 behavior and honest release limitations, especially for context delivery
 - **[docs/PROJECT_DOCS_SCHEMA.md](./docs/PROJECT_DOCS_SCHEMA.md)** — Repo-first, ClawDash-compatible documentation schema for GitHub-backed projects
 - **[docs/CURATION.md](./docs/CURATION.md)** — Promotion, archiving, deduplication pipeline
 - **[SECURITY.md](./SECURITY.md)** — Threat model, controls, trust boundaries

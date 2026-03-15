@@ -165,6 +165,8 @@ These are good future directions, but they are not required to call 2.0 complete
 
 ## Known limitations acceptable in 2.0
 
+See also: [`CLAWTEXT_2_0_SUPPORTED_BEHAVIOR_AND_LIMITATIONS.md`](./CLAWTEXT_2_0_SUPPORTED_BEHAVIOR_AND_LIMITATIONS.md) for the concrete supported-behavior boundary validated during the release wrap-up.
+
 The following limitations are acceptable if they are documented honestly:
 
 1. **Relationship tracking is still lightweight**
