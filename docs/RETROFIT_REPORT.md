@@ -534,3 +534,10 @@ Current blocker:
 - a single release-grade end-to-end proof artifact for generation → transfer → downstream consumption → resumed work was not identified during this pass
 
 See: `docs/LANE_C_CONTINUITY_CONSUMPTION_ASSESSMENT.md`
+
+## Lane E — Publication readiness update
+
+Publication materials were directionally strong, but some wording was too aggressive for the current proof state.
+This pass tightened POST_BRIEF and supporting release notes so public copy remains strong without overclaiming measured impact or fully validated end-to-end coverage where proof artifacts are still hardening.
+
+See: `docs/LANE_E_PUBLICATION_READINESS_ASSESSMENT.md`

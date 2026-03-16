@@ -2,7 +2,7 @@
 
 **Audience:** GitHub, Discord ai-projects channel, public positioning  
 **Source of Truth:** `docs/NORTHSTAR.md`, `docs/PRD.md`, and `docs/MILESTONES.md`  
-**Date:** 2026-03-16 | **Status:** Ready for publication
+**Date:** 2026-03-16 | **Status:** publication-hardening
 
 ---
 
@@ -13,6 +13,14 @@ Use this wording consistently in outward-facing material unless package version 
 - **Package/install version framing:** `@openclaw/clawtext` 1.5.0
 
 Do not imply that the published package is already tagged `2.0.0` unless `package.json` is updated to match.
+
+## Current release-truth constraints
+
+Publication should preserve these current truths:
+- retrieval source support for reviewed/promoted operational patterns appears strong, but the strongest end-to-end proof artifact is still being hardened
+- base multi-agent visibility filtering appears real in source, but release-grade isolation validation is still being hardened
+- continuity artifact generation and bounded transport are strong, but the cleanest end-to-end resume proof is still being hardened
+- quantified impact ranges are directional unless backed by explicit measurement artifacts
 
 ## Opening Hook (One-Liner)
 
@@ -67,17 +75,17 @@ Generates structured handoffs and bootstrap packets so work can move cleanly bet
 ### Automatic Context Retrieval
 Prior decisions, docs, failures, and successful patterns surface without configuration. Your agent continues with context in place instead of asking the same questions again.
 
-**Impact:** Reduces repetitive context re-explanation and setup overhead by ~30-50%.
+**Impact framing:** Expected to reduce repetitive context re-explanation and setup overhead materially; quantified range should be treated as directional until stronger post-launch measurement exists.
 
 ### Operational Learning
 Repeated failures are captured and surfaced for review. When you confirm a pattern is stable, it becomes organizational wisdom. Future agents retrieve it automatically.
 
-**Impact:** Reduces repeated mistakes by ~40-60% after 10+ captures of the same issue.
+**Impact framing:** Intended to reduce repeated mistakes once recurring failures are captured and promoted; quantified range should be treated as directional until stronger proof is collected.
 
 ### Preservable Continuity
 Work can move cleanly between sessions, threads, or recovery surfaces. Structured handoffs preserve decisions, context, and next steps. No manual reconstruction needed.
 
-**Impact:** Enables seamless session transitions and work resumption (~80% context preservation).
+**Impact framing:** Supports structured session transitions and work resumption; exact preservation rate should be treated as directional until stronger end-to-end continuation proof is captured.
 
 ### Honest Boundaries
 We own memory capture, retrieval, and continuity packaging. We don't overclaim Discord transport, relationship graphs, or full agent identity. What we promise, we deliver.
@@ -276,24 +284,24 @@ Current package metadata still reports `1.5.0`. Public copy should present this 
 - Installation and first steps
 - Link to full README and docs
 
-**Tone:** Confident. Show what we do. No disclaimers or hedging.
+**Tone:** Confident, but evidence-disciplined. Strong where behavior is supported; avoid overclaiming beyond validated truth.
 
 ### For Discord ai-projects Channel
 
 **Quick post:**
-"ClawText 2.0 is now stable. Three-layer memory system for OpenClaw agents. Automatic context retrieval, operational learning, continuity artifacts. Install: `openclaw plugins install @openclaw/clawtext`. Full docs: [README link]. Reduces repetitive re-explanation by ~30-50% and repeated mistakes by ~40-60%."
+"ClawText 2.0 is a stable layered memory and continuity system for OpenClaw agents. Automatic context retrieval, operational learning, and structured continuity artifacts. Install: `openclaw plugins install @openclaw/clawtext`. Full docs: [README link]."
 
 ---
 
 ## Quality Gate (Before Publication)
 
 ✅ README reflects Northstar (no internal checklist language)  
-✅ Milestones are validated (all 10 shipped)  
+✅ Milestones reflect current supported behavior and remaining proof gaps  
 ✅ Boundary docs are accurate (no overclaiming)  
 ✅ Installation instructions work  
 ✅ Health tooling is accessible  
 ✅ Team has reviewed messaging  
-✅ Tone is confident, not hedging  
+✅ Tone is confident and evidence-disciplined  
 
 ---
 
@@ -308,4 +316,4 @@ Current package metadata still reports `1.5.0`. Public copy should present this 
 
 ---
 
-**Ready for publication: 2026-03-16**
+**Publication readiness:** conditionally ready once output copy reflects supported claims and current proof gaps honestly.

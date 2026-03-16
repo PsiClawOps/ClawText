@@ -125,3 +125,11 @@ Reason:
 - it is the fastest path to clearer operator confidence
 - it reduces ambiguity before deeper validation work
 - it may simplify downstream publication hardening
+
+
+## Lane E completion target
+Lane E is complete when:
+- POST_BRIEF reflects only supported claims
+- public copy distinguishes strong source support from fully proven end-to-end validation where needed
+- quantified impact statements are either evidenced or clearly directional
+- README/post language no longer overreads the current proof state

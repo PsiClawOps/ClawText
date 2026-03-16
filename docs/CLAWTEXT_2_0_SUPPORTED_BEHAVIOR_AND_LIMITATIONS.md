@@ -212,3 +212,13 @@ The remaining Discord-related limitation is narrow:
 - invalid/stale/non-resolvable thread ids fail visibly
 
 That is acceptable as a documented 2.0 limitation rather than a release blocker.
+
+
+### 5. End-to-end proof still tightening in some areas
+
+Current hardening work has clarified that several concerns are narrower proof gaps rather than broad implementation failures:
+- operational retrieval appears to support reviewed + promoted patterns in source, but a stronger release-grade proof artifact is still desired
+- base multi-agent isolation appears real in source, but stronger validation artifacts are still desired
+- continuity generation/transport are strong, but a clean generation → transfer → downstream consumption → resumed-work proof artifact is still desired
+
+These are not reasons to erase supported behavior. They are reasons to keep public wording honest and evidence-disciplined.

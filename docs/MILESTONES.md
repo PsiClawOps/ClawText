@@ -472,3 +472,9 @@ See detailed finish plan: `docs/RELEASE_HARDENING_PACKET.md`
 - bounded delivery safety and invalid-target failure behavior are documented clearly
 - ingest-based consumption path exists, but fully explicit end-to-end resume proof remains outstanding
 - evidence note: `docs/LANE_C_CONTINUITY_CONSUMPTION_ASSESSMENT.md`
+
+
+### Lane E progress note
+- publication framing was tightened to reflect supported behavior and current proof gaps more honestly
+- quantified impact ranges are now treated as directional rather than fully proven release facts
+- evidence note: `docs/LANE_E_PUBLICATION_READINESS_ASSESSMENT.md`
