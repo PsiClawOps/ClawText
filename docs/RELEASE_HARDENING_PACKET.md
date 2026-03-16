@@ -68,6 +68,11 @@ ClawText is considered finish-ready when all of the following are true:
 - end-to-end artifact consumption demonstration
 - explicit docs covering supported and unsupported continuity behaviors
 
+**Current assessment:**
+- artifact generation and bounded transport appear strong
+- at least one ingest-based consumption path exists
+- stronger end-to-end resume proof is still needed to fully close the lane
+
 ### Lane D — Release truth alignment
 **Goal:** remove any mismatch between package version, release framing, and publication narrative.
 

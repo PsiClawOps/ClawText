@@ -521,3 +521,16 @@ Current blocker:
 - no dedicated release-grade isolation validation artifact was found during this pass
 
 See: `docs/LANE_B_MULTI_AGENT_ISOLATION_ASSESSMENT.md`
+
+## Lane C — Continuity consumption update
+
+Continuity artifact generation and bounded transport behavior appear strong in source and docs:
+- structured handoff/bootstrap/full packets exist
+- backup/manifest creation exists
+- invalid/stale targets fail visibly
+- at least one ingest-based consumption path exists via `bridge/cli.cjs --ingest`
+
+Current blocker:
+- a single release-grade end-to-end proof artifact for generation → transfer → downstream consumption → resumed work was not identified during this pass
+
+See: `docs/LANE_C_CONTINUITY_CONSUMPTION_ASSESSMENT.md`

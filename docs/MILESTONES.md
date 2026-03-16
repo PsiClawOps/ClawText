@@ -465,3 +465,10 @@ See detailed finish plan: `docs/RELEASE_HARDENING_PACKET.md`
 - operational scope isolation exists as a hardening path, but appears feature-flagged
 - remaining blocker: no release-grade validation artifact proving isolation boundaries end-to-end
 - evidence note: `docs/LANE_B_MULTI_AGENT_ISOLATION_ASSESSMENT.md`
+
+
+### Lane C progress note
+- continuity artifact generation is strongly supported in code/docs
+- bounded delivery safety and invalid-target failure behavior are documented clearly
+- ingest-based consumption path exists, but fully explicit end-to-end resume proof remains outstanding
+- evidence note: `docs/LANE_C_CONTINUITY_CONSUMPTION_ASSESSMENT.md`
