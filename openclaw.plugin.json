@@ -5,7 +5,8 @@
   "version": "0.3.0",
   "hooks": [
     "./hooks/clawtext-optimize",
-    "./hooks/clawtext-prune"
+    "./hooks/clawtext-prune",
+    "./hooks/clawtext-prefetch"
   ],
   "configSchema": {
     "type": "object",
