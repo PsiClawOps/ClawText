@@ -38,6 +38,7 @@
     "restore:config:reset": "node scripts/configure-restore.mjs --reset",
     "optimize:report": "node scripts/optimization-report.mjs",
     "optimize:report:last": "node scripts/optimization-report.mjs --last 10",
+    "cross-session:status": "node scripts/cross-session-status.mjs",
     "discord:backfill": "node scripts/discord-backfill.mjs",
     "discord:backfill:dry": "node scripts/discord-backfill.mjs --dry-run --verbose",
     "clawbridge:check": "node -e \"const p = require('./dist/providers/clawbridge-provider.js'); console.log('ClawBridge provider loaded');\""

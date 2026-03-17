@@ -10,7 +10,13 @@ export * from './clawptimization';
 export * from './slot-provider';
 export * from './budget-manager';
 export * from './context-pressure';
+export * from './active-pruning';
 export * from './prompt-compositor';
+export * from './content-type-classifier';
+export * from './contradiction-detector';
+export * from './providers';
+export * from './providers/cross-session-provider';
+export * from './providers/situational-awareness-provider';
 export * from './providers/clawbridge-provider';
 
 function extractUserText(messages: unknown[] = []): string {
