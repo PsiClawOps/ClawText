@@ -20,6 +20,7 @@ Recommended for:
 - hot cache files (`cache/`)
 - operational lifecycle files (`operational/`)
 - extract buffer/state (`ingest/`)
+- library lane runtime state (`library/entries`, `library/indexes`, `library/snapshots`, `library/manifests`)
 - runtime breadcrumbs and other product-owned internals
 
 ## Important nuance

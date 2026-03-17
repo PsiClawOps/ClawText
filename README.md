@@ -255,3 +255,4 @@ openclaw run clawtext --operational:status    # review queue summary, recurrence
 - [`docs/INGEST.md`](docs/INGEST.md) — ingest sources, CLI, and configuration
 - [`docs/HOT_CACHE.md`](docs/HOT_CACHE.md) — hot cache design and tuning
 - [`docs/MEMORY_POLICY_TRIGGER_CONTRACT.md`](docs/MEMORY_POLICY_TRIGGER_CONTRACT.md) — when ClawText captures, retrieves, promotes, or asks
+- [`docs/LIBRARY_LANE.md`](docs/LIBRARY_LANE.md) — post-2.0 design for curated project/library knowledge

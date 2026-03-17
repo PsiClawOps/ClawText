@@ -406,3 +406,12 @@ The fastest path to value is:
 2. create a few excellent entries
 3. wire retrieval intent to use them
 4. then automate refresh later
+
+## 16. Dogfood seed entries
+
+The first seed entries now live in:
+- `docs/library/entries/project-status-clawtext.md`
+- `docs/library/entries/architecture-overview-clawtext.md`
+- `docs/library/entries/repo-map-clawtext.md`
+
+These are example curated library records for ClawText itself. They are repo-stored dogfood examples, not the final runtime store.
