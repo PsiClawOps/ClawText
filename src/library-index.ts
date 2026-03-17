@@ -61,8 +61,19 @@ function ensureStringArray(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === 'string');
 }
 
+function normalizeIndexableText(content: string): string {
+  return content
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function makeSnippet(content: string, maxChars = 600): string {
-  const normalized = content.replace(/\s+/g, ' ').trim();
+  const normalized = normalizeIndexableText(content);
   return normalized.length <= maxChars ? normalized : `${normalized.slice(0, maxChars)}...`;
 }
 
@@ -122,7 +133,8 @@ export class ClawTextLibraryIndex {
       const docs = fs.readdirSync(collectionDir).filter((entry) => entry.endsWith('.json'));
       for (const docFile of docs) {
         const doc = readJson<Record<string, unknown>>(path.join(collectionDir, docFile));
-        const content = typeof doc.content === 'string' ? doc.content : '';
+        const rawContent = typeof doc.content === 'string' ? doc.content : '';
+        const content = normalizeIndexableText(rawContent);
         const title = typeof doc.title === 'string' ? doc.title : `${collection} document`;
         const role = typeof doc.role === 'string' ? doc.role : undefined;
         records.push({
@@ -204,21 +216,44 @@ export class ClawTextLibraryIndex {
       }
     }
 
+    const dedupedMap = new Map<string, LibraryIndexRecord>();
+    for (const record of records) {
+      const key = record.kind === 'collection-doc'
+        ? `${record.kind}:${record.collection || 'library'}:${record.source || record.id}`
+        : `${record.kind}:${record.id}`;
+      const existing = dedupedMap.get(key);
+      if (!existing) {
+        dedupedMap.set(key, record);
+        continue;
+      }
+
+      const existingTs = new Date(existing.updatedAt || 0).getTime();
+      const nextTs = new Date(record.updatedAt || 0).getTime();
+      if (nextTs >= existingTs) {
+        dedupedMap.set(key, record);
+      }
+    }
+
+    const dedupedRecords = Array.from(dedupedMap.values());
+    const collectionRecords = dedupedRecords.filter((record) => record.kind === 'collection-doc');
+    const entryRecords = dedupedRecords.filter((record) => record.kind === 'library-entry');
+    const overlayRecords = dedupedRecords.filter((record) => record.kind === 'library-overlay');
+
     const libraryIndexPath = path.join(indexesDir, 'library-index.json');
     const collectionsPath = path.join(indexesDir, 'collections.json');
     const entriesPath = path.join(indexesDir, 'entries.json');
     const overlaysPath = path.join(indexesDir, 'overlays.json');
 
-    fs.writeFileSync(libraryIndexPath, JSON.stringify({ builtAt: new Date().toISOString(), total: records.length, records }, null, 2));
-    fs.writeFileSync(collectionsPath, JSON.stringify(records.filter((record) => record.kind === 'collection-doc'), null, 2));
-    fs.writeFileSync(entriesPath, JSON.stringify(records.filter((record) => record.kind === 'library-entry'), null, 2));
-    fs.writeFileSync(overlaysPath, JSON.stringify(records.filter((record) => record.kind === 'library-overlay'), null, 2));
+    fs.writeFileSync(libraryIndexPath, JSON.stringify({ builtAt: new Date().toISOString(), total: dedupedRecords.length, records: dedupedRecords }, null, 2));
+    fs.writeFileSync(collectionsPath, JSON.stringify(collectionRecords, null, 2));
+    fs.writeFileSync(entriesPath, JSON.stringify(entryRecords, null, 2));
+    fs.writeFileSync(overlaysPath, JSON.stringify(overlayRecords, null, 2));
 
     return {
-      total: records.length,
-      collections: collectionCount,
-      entries: entryCount,
-      overlays: overlayCount,
+      total: dedupedRecords.length,
+      collections: collectionRecords.length,
+      entries: entryRecords.length,
+      overlays: overlayRecords.length,
       output: libraryIndexPath,
     };
   }

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getClawTextLibraryIndexesDir } from './runtime-paths';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,6 +18,10 @@ interface Memory {
   createdAt?: string;
   dedupeHash?: string;
   sourceFile?: string;
+  provenanceKind?: 'memory' | 'library-entry' | 'collection-doc' | 'library-overlay';
+  provenanceLabel?: string;
+  trustLevel?: string;
+  retrievalScore?: number;
 }
 
 interface Cluster {
@@ -25,13 +30,35 @@ interface Cluster {
   memories: Memory[];
 }
 
+interface LibraryIndexRecord {
+  id: string;
+  kind: 'library-entry' | 'collection-doc' | 'library-overlay';
+  title: string;
+  content: string;
+  snippet: string;
+  collection?: string;
+  topic?: string;
+  project?: string;
+  trust_level?: string;
+  source_type?: string;
+  status?: string;
+  visibility?: string;
+  source?: string;
+  file?: string;
+  keywords: string[];
+  updatedAt?: string;
+}
+
 /**
  * RAG layer for ClawText memory injection
  * Reads pre-built clusters and injects top N memories into prompt context
  */
 export class ClawTextRAG {
+  private workspacePath: string;
   private clustersDir: string;
+  private libraryIndexesDir: string;
   private clusters: Map<string, Cluster> = new Map();
+  private libraryIndex: LibraryIndexRecord[] = [];
   private documentFrequency: Map<string, number> = new Map();
   private totalDocuments: number = 0;
   private avgDocLength: number = 100;
@@ -47,7 +74,9 @@ export class ClawTextRAG {
   };
 
   constructor(workspacePath: string = process.env.HOME + '/.openclaw/workspace') {
+    this.workspacePath = workspacePath;
     this.clustersDir = path.join(workspacePath, 'memory', 'clusters');
+    this.libraryIndexesDir = getClawTextLibraryIndexesDir(workspacePath);
     this.config = {
       enabled: true,
       maxMemories: 5,
@@ -60,6 +89,7 @@ export class ClawTextRAG {
     };
 
     this.loadClusters();
+    this.loadLibraryIndex();
   }
 
   /**
@@ -105,6 +135,23 @@ export class ClawTextRAG {
     console.log(`[ClawText RAG] Loaded ${this.clusters.size} clusters, ${this.totalDocuments} docs, avgLen=${Math.round(this.avgDocLength)}`);
   }
 
+  private loadLibraryIndex(): void {
+    const libraryIndexPath = path.join(this.libraryIndexesDir, 'library-index.json');
+    if (!fs.existsSync(libraryIndexPath)) {
+      this.libraryIndex = [];
+      return;
+    }
+
+    try {
+      const raw = JSON.parse(fs.readFileSync(libraryIndexPath, 'utf8')) as { records?: LibraryIndexRecord[] };
+      this.libraryIndex = Array.isArray(raw.records) ? raw.records : [];
+      console.log(`[ClawText RAG] Loaded ${this.libraryIndex.length} library index records`);
+    } catch (error) {
+      console.warn('[ClawText RAG] Failed to load library index:', error);
+      this.libraryIndex = [];
+    }
+  }
+
   /**
    * Search memories by keywords using BM25 scoring with TF-IDF weighting.
    * k1 controls term frequency saturation; b controls document length normalization.
@@ -145,6 +192,94 @@ export class ClawTextRAG {
     score *= memory.confidence;
 
     return score;
+  }
+
+  private isReferenceQuery(query: string): boolean {
+    const lower = query.toLowerCase();
+    const referenceSignals = [
+      'what do the docs say',
+      'official guidance',
+      'official docs',
+      'documentation',
+      'docs',
+      'manual',
+      'guide',
+      'reference',
+      'how does',
+      'how do',
+      'how is',
+      'install',
+      'configuration',
+      'configure',
+      'what is the recommended',
+      'start here',
+      'where should i start',
+    ];
+
+    return referenceSignals.some((signal) => lower.includes(signal));
+  }
+
+  private libraryScore(query: string, record: LibraryIndexRecord, projectKeywords: string[] = []): number {
+    const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+    const title = record.title.toLowerCase();
+    const topic = (record.topic || '').toLowerCase();
+    const collection = (record.collection || '').toLowerCase();
+    const keywordText = (record.keywords || []).join(' ').toLowerCase();
+    const searchable = `${title} ${topic} ${collection} ${keywordText} ${record.snippet || ''}`.toLowerCase();
+
+    let score = 0;
+    queryTerms.forEach(term => {
+      if (title.includes(term)) score += 2.0;
+      else if (topic.includes(term) || collection.includes(term)) score += 1.5;
+      else if (keywordText.includes(term)) score += 1.25;
+      else if (searchable.includes(term)) score += 1.0;
+    });
+
+    if (projectKeywords.length > 0) {
+      const lowerProjects = projectKeywords.map(project => project.toLowerCase());
+      const matchesProject = lowerProjects.some(project =>
+        collection.includes(project) || topic.includes(project) || title.includes(project)
+      );
+      if (matchesProject) score *= 1.5;
+    }
+
+    if (record.kind === 'library-entry') score *= 1.6;
+    else if (record.kind === 'library-overlay') score *= 1.2;
+    else if (record.kind === 'collection-doc') score *= 1.1;
+
+    if (record.trust_level === 'official') score *= 1.5;
+    else if (record.trust_level === 'internal') score *= 1.35;
+    else if (record.trust_level === 'reviewed-community') score *= 1.1;
+
+    if (record.status === 'active') score *= 1.1;
+    if (record.status === 'stale' || record.status === 'superseded' || record.status === 'archived') score *= 0.6;
+
+    return score;
+  }
+
+  private findRelevantLibraryRecords(query: string, projectKeywords: string[] = []): Memory[] {
+    if (this.libraryIndex.length === 0 || !this.isReferenceQuery(query)) return [];
+
+    return this.libraryIndex
+      .map(record => ({ record, score: this.libraryScore(query, record, projectKeywords) }))
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, this.config.maxMemories)
+      .map(({ record, score }) => ({
+        id: record.id,
+        content: record.snippet || record.content,
+        type: 'reference',
+        source: record.source || record.file || 'library',
+        project: record.project || record.collection || 'library',
+        confidence: record.trust_level === 'official' ? 0.96 : record.trust_level === 'internal' ? 0.92 : 0.85,
+        keywords: record.keywords || [],
+        updatedAt: record.updatedAt || new Date().toISOString(),
+        sourceType: 'library',
+        provenanceKind: record.kind,
+        provenanceLabel: record.collection || record.title,
+        trustLevel: record.trust_level,
+        retrievalScore: score,
+      }));
   }
 
   /**
@@ -229,6 +364,7 @@ export class ClawTextRAG {
 
     // Parse time filter from query (if present)
     const timeFilter = this.parseTimeFilter(query);
+    const isReference = this.isReferenceQuery(query);
 
     // Determine which clusters to search
     const targetProjects = projectKeywords.length > 0 
@@ -250,7 +386,7 @@ export class ClawTextRAG {
 
       cluster.memories.forEach(memory => {
         if (memory.confidence >= this.config.minConfidence) {
-          candidates.push(memory);
+          candidates.push({ ...memory, provenanceKind: 'memory', provenanceLabel: memory.project || 'memory' });
         }
       });
     });
@@ -260,14 +396,28 @@ export class ClawTextRAG {
       candidates = this.filterByTime(candidates, timeFilter);
     }
 
-    // Score and rank
-    const scored = candidates
-      .map(memory => ({ ...memory, score: this.bm25Score(query, memory) }))
-      .filter(m => m.score > 0)
-      .sort((a, b) => b.score - a.score)
+    const scoredMemory = candidates
+      .map(memory => ({
+        ...memory,
+        retrievalScore: this.bm25Score(query, memory) * (isReference ? 0.45 : 1.0),
+      }))
+      .filter(m => (m.retrievalScore || 0) > 0);
+
+    const libraryMemories = this.findRelevantLibraryRecords(query, projectKeywords)
+      .map(memory => ({
+        ...memory,
+        retrievalScore: (memory.retrievalScore || 0) * (isReference ? 3.5 : 1.0),
+      }));
+
+    const combined = isReference && libraryMemories.length > 0
+      ? [...libraryMemories]
+      : [...scoredMemory, ...libraryMemories];
+
+    const scored = combined
+      .sort((a, b) => (b.retrievalScore || 0) - (a.retrievalScore || 0))
       .slice(0, this.config.maxMemories);
 
-    return scored.map(({ score, ...memory }) => memory);
+    return scored.map(({ retrievalScore, ...memory }) => memory);
   }
 
   /**
@@ -286,6 +436,7 @@ export class ClawTextRAG {
       }
       score += (m.confidence || 0) * 0.5;
       if (m.type === 'decision' || m.type === 'context') score += 0.35;
+      if (m.type === 'reference') score += 2.0;
       return { id, memory: m, score };
     });
 
@@ -317,11 +468,19 @@ export class ClawTextRAG {
       decision: [] as string[],
       fact: [] as string[],
       code: [] as string[],
+      reference: [] as string[],
     };
 
     memories.forEach(m => {
-      const type = m.type as keyof typeof sections || 'fact';
-      sections[type].push(m.content);
+      const type = (m.type as keyof typeof sections) || 'fact';
+      const line = m.provenanceKind && m.provenanceKind !== 'memory'
+        ? `[${m.provenanceKind}${m.provenanceLabel ? `: ${m.provenanceLabel}` : ''}${m.trustLevel ? ` | ${m.trustLevel}` : ''}] ${m.content}`
+        : m.content;
+      if (sections[type]) {
+        sections[type].push(line);
+      } else {
+        sections.fact.push(line);
+      }
     });
 
     let output = '\n## 🧠 Relevant Context\n\n';
@@ -336,6 +495,10 @@ export class ClawTextRAG {
 
     if (sections.fact.length > 0) {
       output += '### Facts\n' + sections.fact.map(f => `- ${f}`).join('\n') + '\n\n';
+    }
+
+    if (sections.reference.length > 0) {
+      output += '### Reference Library\n' + sections.reference.map(r => `- ${r}`).join('\n') + '\n\n';
     }
 
     if (sections.code.length > 0) {
@@ -416,6 +579,7 @@ export class ClawTextRAG {
 
     return {
       clustersLoaded: this.clusters.size,
+      libraryRecordsLoaded: this.libraryIndex.length,
       totalMemories,
       config: this.config,
     };
