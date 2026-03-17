@@ -32,3 +32,31 @@ export function getClawTextIngestStateDir(workspacePath: string): string {
 export function getClawTextEvalDevDir(workspacePath: string): string {
   return path.join(getClawTextDevStateRoot(workspacePath), 'evals');
 }
+
+export function getClawTextLibraryDir(workspacePath: string): string {
+  return path.join(getClawTextProdStateRoot(workspacePath), 'library');
+}
+
+export function getClawTextLibraryCollectionsDir(workspacePath: string): string {
+  return path.join(getClawTextLibraryDir(workspacePath), 'collections');
+}
+
+export function getClawTextLibraryEntriesDir(workspacePath: string): string {
+  return path.join(getClawTextLibraryDir(workspacePath), 'entries');
+}
+
+export function getClawTextLibraryOverlaysDir(workspacePath: string): string {
+  return path.join(getClawTextLibraryDir(workspacePath), 'overlays');
+}
+
+export function getClawTextLibraryIndexesDir(workspacePath: string): string {
+  return path.join(getClawTextLibraryDir(workspacePath), 'indexes');
+}
+
+export function getClawTextLibrarySnapshotsDir(workspacePath: string): string {
+  return path.join(getClawTextLibraryDir(workspacePath), 'snapshots');
+}
+
+export function getClawTextLibraryManifestsDir(workspacePath: string): string {
+  return path.join(getClawTextLibraryDir(workspacePath), 'manifests');
+}

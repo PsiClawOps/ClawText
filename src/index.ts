@@ -2,6 +2,8 @@ import { ClawTextInjectionPlugin } from './plugin';
 import { ClawTextRAG } from './rag';
 
 export { ClawTextInjectionPlugin, ClawTextRAG };
+export * from './library';
+export * from './runtime-paths';
 
 function extractUserText(messages: unknown[] = []): string {
   if (!Array.isArray(messages) || messages.length === 0) {
