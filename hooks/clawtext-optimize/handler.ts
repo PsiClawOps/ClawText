@@ -2,11 +2,14 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {
-  Clawptimizer,
   DEFAULT_CLAWPTIMIZATION_CONFIG,
+  Clawptimizer,
   type ClawptimizationConfig,
   type ContextSlot,
+  type ContextSlotSource,
 } from '../../src/clawptimization.ts';
+import { PromptCompositor } from '../../src/prompt-compositor.ts';
+import type { SlotProvider } from '../../src/slot-provider.ts';
 
 type PluginHookBeforePromptBuildEvent = {
   prompt: string;
@@ -32,7 +35,7 @@ type PluginHookAgentContext = {
 type ParsedSection = {
   title: string;
   content: string;
-  source: ContextSlot['source'];
+  source: ContextSlotSource;
 };
 
 const WORKSPACE = path.join(os.homedir(), '.openclaw', 'workspace');
@@ -50,8 +53,29 @@ function loadConfig(): ClawptimizationConfig {
       return { ...DEFAULT_CLAWPTIMIZATION_CONFIG };
     }
 
-    const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) as Partial<ClawptimizationConfig>;
-    return { ...DEFAULT_CLAWPTIMIZATION_CONFIG, ...parsed };
+    const parsed = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) as Partial<ClawptimizationConfig> & {
+      budgetRatio?: number;
+      budgetBytes?: number;
+    };
+
+    const merged: ClawptimizationConfig = {
+      ...DEFAULT_CLAWPTIMIZATION_CONFIG,
+      ...parsed,
+      budget: {
+        ...DEFAULT_CLAWPTIMIZATION_CONFIG.budget,
+        ...(parsed.budget ?? {}),
+      },
+    };
+
+    if (typeof parsed.budgetRatio === 'number' && !parsed.budget?.budgetRatio) {
+      merged.budget = { ...merged.budget, budgetRatio: parsed.budgetRatio };
+    }
+
+    if (typeof parsed.budgetBytes === 'number' && parsed.budgetBytes > 0) {
+      merged.budgetBytes = parsed.budgetBytes;
+    }
+
+    return merged;
   } catch {
     return { ...DEFAULT_CLAWPTIMIZATION_CONFIG };
   }
@@ -82,11 +106,6 @@ function parsePromptSections(prompt: string): ParsedSection[] {
       continue;
     }
 
-    if (/^<!--\s*END\s+/i.test(line) || /^===+\s*$/.test(line)) {
-      currentLines.push(line);
-      continue;
-    }
-
     currentLines.push(line);
   }
 
@@ -99,13 +118,17 @@ function parsePromptSections(prompt: string): ParsedSection[] {
   return sections;
 }
 
-function inferSource(title: string, content: string): ContextSlot['source'] {
+function inferSource(title: string, content: string): ContextSlotSource {
   const haystack = `${title}\n${content}`.toLowerCase();
 
   if (haystack.includes('journal') || haystack.includes('restored context')) return 'journal';
   if (haystack.includes('memory') || haystack.includes('memories')) return 'memory';
-  if (haystack.includes('discord') || haystack.includes('history')) return 'discord-history';
+  if (haystack.includes('clawbridge') || haystack.includes('handoff')) return 'clawbridge';
   if (haystack.includes('library') || haystack.includes('reference')) return 'library';
+  if (haystack.includes('decision')) return 'decision-tree';
+  if (haystack.includes('deep history')) return 'deep-history';
+  if (haystack.includes('mid history')) return 'mid-history';
+  if (haystack.includes('history')) return 'recent-history';
   return 'system';
 }
 
@@ -113,16 +136,70 @@ function composeOptimizedContext(slots: ContextSlot[]): string {
   const included = slots.filter((slot) => slot.included);
   if (included.length === 0) return '';
 
-  const blocks = included.map((slot) => {
-    const header = `## ${slot.id}`;
-    return `${header}\n${slot.content}`;
-  });
+  const blocks = included.map((slot) => `## ${slot.id}\n${slot.content}`);
 
-  return [
-    '<!-- CLAWPTIMIZATION: optimized context -->',
-    ...blocks,
-    '<!-- END CLAWPTIMIZATION -->',
-  ].join('\n\n');
+  return ['<!-- CLAWPTIMIZATION: optimized context -->', ...blocks, '<!-- END CLAWPTIMIZATION -->'].join(
+    '\n\n',
+  );
+}
+
+function providerFromSections(
+  source: ContextSlotSource,
+  sections: ParsedSection[],
+  optimizer: Clawptimizer,
+): SlotProvider {
+  return {
+    id: `parsed:${source}`,
+    source,
+    priority: priorityForSource(source),
+    available: () => sections.length > 0,
+    fill: () => {
+      return sections.map((section, index) => {
+        const bytes = Buffer.byteLength(section.content, 'utf8');
+        const ageMs = index * 60 * 1000;
+        const score = optimizer.scoreContent(section.content, {
+          source,
+          ageMs,
+          isRawLog: /```|stack trace|error:|\{.+\}/is.test(section.content),
+          precedingGapMs: index > 0 ? 5 * 60 * 1000 : 0,
+        });
+
+        const freshness = Math.max(0, Math.min(1, 1 - ageMs / (12 * 60 * 60 * 1000)));
+        const substance = Math.min(1, section.content.split(/\s+/).filter(Boolean).length / 80);
+        const novelty = index === 0 ? 1 : 0.8;
+
+        return {
+          id: section.title || `${source}-${index + 1}`,
+          source,
+          content: section.content,
+          score,
+          bytes,
+          included: false,
+          reason: `freshness:${freshness.toFixed(2)} substance:${substance.toFixed(2)} novelty:${novelty.toFixed(2)}`,
+        };
+      });
+    },
+    prunable: source !== 'system' && source !== 'recent-history',
+  };
+}
+
+function priorityForSource(source: ContextSlotSource): number {
+  const ordering: Record<ContextSlotSource, number> = {
+    system: 10,
+    memory: 20,
+    library: 30,
+    clawbridge: 40,
+    'recent-history': 50,
+    'mid-history': 60,
+    'deep-history': 70,
+    'decision-tree': 80,
+    journal: 90,
+    'cross-session': 100,
+    'situational-awareness': 110,
+    custom: 120,
+  };
+
+  return ordering[source] ?? 999;
 }
 
 const handler = async (
@@ -147,42 +224,47 @@ const handler = async (
 
   const now = Date.now();
   const optimizer = new Clawptimizer(WORKSPACE, config);
-
-  const slots: ContextSlot[] = parsed.map((section, index) => {
-    const bytes = Buffer.byteLength(section.content, 'utf8');
-    const ageMs = index * 60 * 1000;
-    const score = optimizer.scoreContent(section.content, {
-      source: section.source,
-      ageMs,
-      isRawLog: /```|stack trace|error:|\{.+\}/is.test(section.content),
-      precedingGapMs: index > 0 ? 5 * 60 * 1000 : 0,
-    });
-
-    const freshness = Math.max(0, Math.min(1, 1 - ageMs / (12 * 60 * 60 * 1000)));
-    const substance = Math.min(1, section.content.split(/\s+/).filter(Boolean).length / 80);
-    const novelty = index === 0 ? 1 : 0.8;
-
-    return {
-      id: section.title || `Section ${index + 1}`,
-      source: section.source,
-      content: section.content,
-      score,
-      bytes,
-      included: false,
-      reason: `freshness:${freshness.toFixed(2)} substance:${substance.toFixed(2)} novelty:${novelty.toFixed(2)}`,
-    };
+  const compositor = new PromptCompositor({
+    enabled: config.enabled,
+    strategy: config.strategy,
+    minScore: config.minScore,
+    preserveReasons: config.preserveReasons,
+    logDecisions: false,
+    workspacePath: WORKSPACE,
+    budget: {
+      contextWindowTokens: config.budget?.contextWindowTokens ?? 160_000,
+      budgetRatio: config.budget?.budgetRatio,
+      slots: config.budget?.slots,
+      overflowMode: config.budget?.overflowMode,
+    },
   });
 
-  const result = optimizier.optimize(slots);
-  const prependContext = composeOptimizedContext(result.slots);
+  const bySource = new Map<ContextSlotSource, ParsedSection[]>();
+  for (const section of parsed) {
+    const list = bySource.get(section.source) ?? [];
+    list.push(section);
+    bySource.set(section.source, list);
+  }
 
+  for (const [source, sections] of bySource.entries()) {
+    compositor.register(providerFromSections(source, sections, optimizer));
+  }
+
+  const result = compositor.compose({
+    channelId: ctx.messageChannel || 'unknown',
+    sessionKey: ctx.sessionKey || ctx.sessionId || `session-${now}`,
+    modelContextWindowTokens: config.budget?.contextWindowTokens ?? 160_000,
+    currentTurnCount: Array.isArray(event.messages) ? event.messages.length : 0,
+  });
+
+  const prependContext = composeOptimizedContext(result.slots);
   if (!prependContext) {
     return;
   }
 
   if (config.logDecisions) {
     const sessionKey = ctx.sessionKey || ctx.sessionId || `session-${now}`;
-    optimizier.logDecision(result, sessionKey);
+    optimizer.logDecision(result, sessionKey);
   }
 
   return { prependContext };

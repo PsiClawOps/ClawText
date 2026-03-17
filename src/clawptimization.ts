@@ -1,132 +1,102 @@
-import fs from 'fs';
-import path from 'path';
 import os from 'os';
+import path from 'path';
+import { DEFAULT_SLOT_CONFIGS } from './budget-manager.js';
+import { PromptCompositor, type CompositionResult, type CompositionStrategy } from './prompt-compositor.js';
+import type { ContextSlot, ContextSlotSource, SlotConfig, SlotProvider } from './slot-provider.js';
 
-export interface ContextSlot {
-  id: string;
-  source: 'journal' | 'memory' | 'discord-history' | 'library' | 'system';
-  content: string;
-  score: number;
-  bytes: number;
-  included: boolean;
-  reason: string;
-}
-
-export interface OptimizationResult {
-  slots: ContextSlot[];
-  totalBytes: number;
-  totalTokensEst: number;
-  includedCount: number;
-  droppedCount: number;
-  budgetBytes: number;
-  strategy: string;
-}
+export type OptimizationResult = CompositionResult;
 
 export interface ClawptimizationConfig {
   enabled: boolean;
-  budgetBytes: number;
+  budgetBytes?: number;
   minScore: number;
   preserveReasons: boolean;
-  strategy: 'scored-select' | 'passthrough' | 'budget-trim';
+  strategy: CompositionStrategy;
   logDecisions: boolean;
+  budget?: {
+    budgetRatio?: number;
+    contextWindowTokens?: number;
+    slots?: Partial<Record<ContextSlotSource, SlotConfig>>;
+    overflowMode?: 'redistribute' | 'none';
+  };
 }
 
 export const DEFAULT_CLAWPTIMIZATION_CONFIG: ClawptimizationConfig = {
   enabled: false,
-  budgetBytes: 32000,
   minScore: 0.25,
   preserveReasons: true,
   strategy: 'passthrough',
   logDecisions: true,
+  budget: {
+    budgetRatio: 0.15,
+    contextWindowTokens: 160_000,
+    slots: { ...DEFAULT_SLOT_CONFIGS },
+    overflowMode: 'redistribute',
+  },
 };
 
 export class Clawptimizer {
   private readonly workspacePath: string;
   private readonly config: ClawptimizationConfig;
-  private readonly logFilePath: string;
 
   constructor(workspacePath: string, config: Partial<ClawptimizationConfig> = {}) {
     this.workspacePath = workspacePath;
-    this.config = { ...DEFAULT_CLAWPTIMIZATION_CONFIG, ...config };
-    this.logFilePath = path.join(
-      this.workspacePath,
-      'state',
-      'clawtext',
-      'prod',
-      'optimization-log.jsonl',
-    );
+    this.config = {
+      ...DEFAULT_CLAWPTIMIZATION_CONFIG,
+      ...config,
+      budget: {
+        ...DEFAULT_CLAWPTIMIZATION_CONFIG.budget,
+        ...(config.budget ?? {}),
+        slots: {
+          ...DEFAULT_CLAWPTIMIZATION_CONFIG.budget?.slots,
+          ...(config.budget?.slots ?? {}),
+        },
+      },
+    };
   }
 
   optimize(slots: ContextSlot[]): OptimizationResult {
-    const cloned = slots.map((slot) => ({ ...slot, included: false }));
-
-    if (!this.config.enabled || this.config.strategy === 'passthrough') {
-      for (const slot of cloned) {
-        slot.included = true;
-        if (!slot.reason) {
-          slot.reason = 'passthrough';
-        }
-      }
-      const totalBytes = cloned.reduce((sum, slot) => sum + slot.bytes, 0);
-      return {
-        slots: cloned,
-        totalBytes,
-        totalTokensEst: Math.ceil(totalBytes / 4),
-        includedCount: cloned.length,
-        droppedCount: 0,
-        budgetBytes: this.config.budgetBytes,
-        strategy: this.config.strategy,
-      };
-    }
-
-    const budget = Math.max(0, this.config.budgetBytes);
-    const minScore = Math.max(0, Math.min(1, this.config.minScore));
-
-    let ranking: ContextSlot[];
-    if (this.config.strategy === 'budget-trim') {
-      ranking = [...cloned];
-    } else {
-      ranking = [...cloned].sort((a, b) => b.score - a.score || a.bytes - b.bytes);
-    }
-
-    let bytesUsed = 0;
-    for (const slot of ranking) {
-      const eligible = slot.score >= minScore;
-      const fits = bytesUsed + slot.bytes <= budget;
-
-      if (eligible && fits) {
-        slot.included = true;
-        bytesUsed += slot.bytes;
-        if (this.config.preserveReasons) {
-          slot.reason = `${slot.reason} include:score>=${minScore.toFixed(2)} budget:${bytesUsed}/${budget}`.trim();
-        } else {
-          slot.reason = 'included';
-        }
-      } else {
-        slot.included = false;
-        const dropReason = !eligible
-          ? `drop:minScore(${slot.score.toFixed(2)}<${minScore.toFixed(2)})`
-          : `drop:budget(${bytesUsed + slot.bytes}>${budget})`;
-        slot.reason = this.config.preserveReasons ? `${slot.reason} ${dropReason}`.trim() : 'dropped';
-      }
-    }
-
-    const byOriginalOrder = cloned;
-    const totalBytes = byOriginalOrder
-      .filter((slot) => slot.included)
-      .reduce((sum, slot) => sum + slot.bytes, 0);
-    const includedCount = byOriginalOrder.filter((slot) => slot.included).length;
-    const droppedCount = byOriginalOrder.length - includedCount;
-
-    return {
-      slots: byOriginalOrder,
-      totalBytes,
-      totalTokensEst: Math.ceil(totalBytes / 4),
-      includedCount,
-      droppedCount,
-      budgetBytes: budget,
+    const contextWindowTokens = this.resolveContextWindowTokens();
+    const compositor = new PromptCompositor({
+      enabled: this.config.enabled,
       strategy: this.config.strategy,
-    };
+      minScore: this.config.minScore,
+      preserveReasons: this.config.preserveReasons,
+      logDecisions: false,
+      workspacePath: this.workspacePath,
+      budget: {
+        contextWindowTokens,
+        budgetRatio: this.config.budget?.budgetRatio,
+        slots: this.config.budget?.slots,
+        overflowMode: this.config.budget?.overflowMode,
+      },
+    });
+
+    const grouped = new Map<ContextSlotSource, ContextSlot[]>();
+    for (const slot of slots) {
+      const source = slot.source ?? 'custom';
+      const current = grouped.get(source) ?? [];
+      current.push({ ...slot });
+      grouped.set(source, current);
+    }
+
+    for (const [source, sourceSlots] of grouped.entries()) {
+      const provider: SlotProvider = {
+        id: `legacy:${source}`,
+        source,
+        priority: 100,
+        available: () => sourceSlots.length > 0,
+        fill: () => sourceSlots.map((slot) => ({ ...slot, source })),
+      };
+      compositor.register(provider);
+    }
+
+    return compositor.compose({
+      channelId: 'legacy',
+      sessionKey: 'legacy',
+      modelContextWindowTokens: contextWindowTokens,
+      currentTurnCount: 0,
+    });
   }
 
   scoreContent(
@@ -154,7 +124,10 @@ export class Clawptimizer {
       memory: 0.92,
       library: 0.88,
       journal: 0.82,
-      'discord-history': 0.78,
+      'recent-history': 0.8,
+      'mid-history': 0.78,
+      'deep-history': 0.75,
+      custom: 0.8,
     };
 
     const sourceBoost = sourceBoostMap[metadata.source] ?? 0.8;
@@ -162,7 +135,6 @@ export class Clawptimizer {
     const weighted = (freshness * 0.35 + substance * 0.4 + novelty * 0.25) * rawPenalty * sourceBoost;
     const finalScore = Math.max(0, Math.min(1, weighted));
 
-    // tiny floor for very short but potentially important snippets
     if (length < 40) {
       return Math.max(0.1, finalScore * 0.8);
     }
@@ -173,46 +145,38 @@ export class Clawptimizer {
   logDecision(result: OptimizationResult, sessionKey: string): void {
     if (!this.config.logDecisions) return;
 
-    const originalBytes = result.slots.reduce((sum, slot) => sum + slot.bytes, 0);
-    const dropped = result.slots.filter((slot) => !slot.included);
-    const channel = this.deriveChannelFromSessionKey(sessionKey);
+    const compositor = new PromptCompositor({
+      enabled: this.config.enabled,
+      strategy: this.config.strategy,
+      minScore: this.config.minScore,
+      preserveReasons: this.config.preserveReasons,
+      logDecisions: true,
+      workspacePath: this.workspacePath,
+      budget: {
+        contextWindowTokens: this.resolveContextWindowTokens(),
+        budgetRatio: this.config.budget?.budgetRatio,
+        slots: this.config.budget?.slots,
+        overflowMode: this.config.budget?.overflowMode,
+      },
+    });
 
-    const payload = {
-      ts: Date.now(),
-      iso: new Date().toISOString(),
-      sessionKey,
-      channel,
-      strategy: result.strategy,
-      budgetBytes: result.budgetBytes,
-      originalBytes,
-      totalBytes: result.totalBytes,
-      totalTokensEst: result.totalTokensEst,
-      includedCount: result.includedCount,
-      droppedCount: result.droppedCount,
-      droppedReasons: dropped.map((slot) => slot.reason),
-      slots: result.slots,
-    };
-
-    const dir = path.dirname(this.logFilePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-
-    fs.appendFileSync(this.logFilePath, `${JSON.stringify(payload)}\n`, 'utf8');
+    compositor.logDecision(result, sessionKey);
   }
 
-  private deriveChannelFromSessionKey(sessionKey: string): string {
-    if (!sessionKey) return 'unknown';
+  private resolveContextWindowTokens(): number {
+    const configured = this.config.budget?.contextWindowTokens;
+    if (configured && configured > 0) return Math.floor(configured);
 
-    if (sessionKey.includes(':channel:')) {
-      return sessionKey.split(':channel:').pop() || 'unknown';
+    if (this.config.budgetBytes && this.config.budgetBytes > 0) {
+      const ratio = this.config.budget?.budgetRatio ?? 0.15;
+      return Math.max(16_000, Math.floor(this.config.budgetBytes / (4 * ratio)));
     }
-    if (sessionKey.includes(':topic:')) {
-      return sessionKey.split(':topic:').pop() || 'unknown';
-    }
-    return 'unknown';
+
+    return 160_000;
   }
 }
+
+export type { ContextSlot, ContextSlotSource, SlotConfig } from './slot-provider.js';
 
 export function resolveWorkspacePath(defaultHome = os.homedir()): string {
   return path.join(defaultHome, '.openclaw', 'workspace');

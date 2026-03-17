@@ -7,6 +7,10 @@ export * from './library-index';
 export * from './library-ingest';
 export * from './runtime-paths';
 export * from './clawptimization';
+export * from './slot-provider';
+export * from './budget-manager';
+export * from './context-pressure';
+export * from './prompt-compositor';
 
 function extractUserText(messages: unknown[] = []): string {
   if (!Array.isArray(messages) || messages.length === 0) {
