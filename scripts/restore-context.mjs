@@ -76,11 +76,9 @@ function getJournalFilesForRange(days) {
 
 // ── Read and filter records ───────────────────────────────────────────────────
 function readRecordsForChannel(files, channelId, limit) {
-  const records = [];
+  const allRecords = [];
 
   for (const file of files) {
-    if (records.length >= limit * 3) break; // over-read then trim, for safety
-
     let raw;
     try { raw = fs.readFileSync(file, 'utf8'); } catch { continue; }
 
@@ -89,14 +87,30 @@ function readRecordsForChannel(files, channelId, limit) {
       try {
         const rec = JSON.parse(line);
         if (rec.channel === channelId || rec.conversationId === channelId) {
-          records.push(rec);
+          allRecords.push(rec);
         }
       } catch { /* skip malformed */ }
     }
   }
 
-  // Sort oldest→newest, take the last `limit` entries
-  records.sort((a, b) => a.ts - b.ts);
+  // Sort oldest→newest
+  allRecords.sort((a, b) => a.ts - b.ts);
+
+  // If there are checkpoints, find the most recent one and return
+  // only messages AFTER it — that's the current session context
+  const checkpoints = allRecords.filter(r => r.type === 'checkpoint');
+  const lastCheckpoint = checkpoints[checkpoints.length - 1];
+
+  let records = allRecords;
+  if (lastCheckpoint) {
+    const afterCheckpoint = allRecords.filter(r => r.ts > lastCheckpoint.ts && r.type !== 'checkpoint');
+    // If there's meaningful content after the last checkpoint, use just that
+    // Otherwise fall back to all records (checkpoint may have just been written)
+    if (afterCheckpoint.length >= 3) {
+      records = afterCheckpoint;
+    }
+  }
+
   return records.slice(-limit);
 }
 
