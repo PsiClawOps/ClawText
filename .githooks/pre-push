@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${CLAWTOMATION_BYPASS:-0}" == "1" ]]; then
+  echo "clawtomation pre-push: bypass enabled via CLAWTOMATION_BYPASS=1"
+  exit 0
+fi
+
+RUNNER="$(git config --get clawtomation.runner || true)"
+if [[ -z "$RUNNER" ]]; then
+  echo "clawtomation pre-push: missing git config 'clawtomation.runner'" >&2
+  exit 1
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+ALLOW_MAIN_FLAG=()
+if [[ "${CLAWTOMATION_ALLOW_MAIN_PUSH:-0}" == "1" ]]; then
+  ALLOW_MAIN_FLAG=(--allow-main)
+fi
+
+exec "$RUNNER" check --repo "$REPO_ROOT" --enforcement-mode private-stealth "${ALLOW_MAIN_FLAG[@]}"

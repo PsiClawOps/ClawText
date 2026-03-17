@@ -1,0 +1,316 @@
+name: northstar-impact-check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled, edited, ready_for_review]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate lifecycle enforcement policy
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          REQUIRED_FILES=(
+            "README.md"
+            "docs/NORTHSTAR.md"
+            "docs/PRD.md"
+            "docs/MILESTONES.md"
+            "docs/POST_BRIEF.md"
+            "docs/FLIGHT_CONTROL.md"
+            "docs/MILESTONE_OUTPUT_SPEC.md"
+            "docs/LIFECYCLE_BASELINE.md"
+            "docs/foundation/RESEARCH_BOOTSTRAP.md"
+            "docs/foundation/README_REQUIREMENTS.md"
+            ".github/pull_request_template.md"
+            ".github/workflows/northstar-impact-check.yml"
+          )
+
+          NORTHSTAR_REQUIRED_HEADINGS=(
+            "## 1) Mission [IMMUTABLE]"
+            "## 3) Target User / ICP [IMMUTABLE]"
+            "## 6) Strategic Locks [IMMUTABLE]"
+            "## 7) Do-not-become [IMMUTABLE]"
+            "## 8) Adjacent Product Boundaries [IMMUTABLE]"
+            "## 9) Core Experience / Center of Gravity [IMMUTABLE]"
+            "## 10) Canonical Terms [CONTROLLED EVOLVING]"
+            "## 18) North Star Maturity [EVOLVING]"
+          )
+
+          ENFORCING_LABELS=(
+            "northstar-impact"
+            "major-feature"
+            "breaking-change"
+            "architecture-change"
+            "execution-policy-change"
+            "milestone-delivery"
+            "publication-change"
+          )
+
+          CANON_DOCS=(
+            "docs/NORTHSTAR.md"
+            "docs/PRD.md"
+            "docs/MILESTONES.md"
+            "docs/NORTHSTAR_CHANGELOG.md"
+            "docs/POST_BRIEF.md"
+            "docs/FLIGHT_CONTROL.md"
+            "docs/MILESTONE_OUTPUT_SPEC.md"
+          )
+
+          MILESTONE_DELIVERY_REQUIRED_TOUCHES=(
+            "README.md"
+            "docs/MILESTONES.md"
+            "docs/POST_BRIEF.md"
+          )
+
+          require_file() {
+            local file="$1"
+            if [[ ! -f "$file" ]]; then
+              echo "❌ Missing required file: $file"
+              exit 1
+            fi
+          }
+
+          require_heading() {
+            local file="$1"
+            local heading="$2"
+            if ! grep -Fq "$heading" "$file"; then
+              echo "❌ Missing required heading in $file: $heading"
+              exit 1
+            fi
+          }
+
+          has_label() {
+            local label="$1"
+            echo "$PR_LABELS_JSON" | grep -q "\"$label\""
+          }
+
+          any_label_present() {
+            local label
+            for label in "$@"; do
+              if has_label "$label"; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          file_changed() {
+            local file="$1"
+            echo "$CHANGED_FILES" | grep -qx "$file"
+          }
+
+          any_file_changed() {
+            local file
+            for file in "$@"; do
+              if file_changed "$file"; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          echo "PR labels: $PR_LABELS_JSON"
+
+          echo "Checking required files..."
+          for file in "${REQUIRED_FILES[@]}"; do
+            require_file "$file"
+          done
+
+          echo "Checking required Northstar headings..."
+          for heading in "${NORTHSTAR_REQUIRED_HEADINGS[@]}"; do
+            require_heading "docs/NORTHSTAR.md" "$heading"
+          done
+
+          git fetch origin "$BASE_REF" --depth=1
+          CHANGED_FILES=$(git diff --name-only "origin/$BASE_REF...$HEAD_SHA")
+
+          echo "Changed files:"
+          if [[ -n "$CHANGED_FILES" ]]; then
+            echo "$CHANGED_FILES"
+          else
+            echo "(none)"
+          fi
+
+          if ! any_label_present "${ENFORCING_LABELS[@]}"; then
+            echo "No enforcing labels found. Structural checks passed."
+            exit 0
+          fi
+
+          echo "Enforcing label detected. Evaluating lifecycle impact policy..."
+
+          if any_file_changed "${CANON_DOCS[@]}"; then
+            echo "Canonical lifecycle docs were updated. Passing general impact policy."
+          else
+            no_impact_declared=false
+            if echo "${PR_BODY:-}" | grep -Eiq "no\s+northstar\s+impact"; then
+              no_impact_declared=true
+            fi
+
+            if [[ "$no_impact_declared" != "true" ]]; then
+              echo "❌ This PR has an enforcing label but no canonical lifecycle doc updates were found."
+              echo "Update one or more of these files or provide explicit 'No Northstar Impact' rationale in the PR body:"
+              for file in "${CANON_DOCS[@]}"; do
+                echo "- $file"
+              done
+              exit 1
+            fi
+
+            echo "Explicit 'No Northstar Impact' declaration found in PR body. Passing general impact policy."
+          fi
+
+          if any_label_present "architecture-change"; then
+            if ! any_file_changed "docs/PRD.md"; then
+              echo "❌ 'architecture-change' requires docs/PRD.md to be updated."
+              exit 1
+            fi
+          fi
+
+          if any_label_present "execution-policy-change"; then
+            if ! any_file_changed "docs/FLIGHT_CONTROL.md"; then
+              echo "❌ 'execution-policy-change' requires docs/FLIGHT_CONTROL.md to be updated."
+              exit 1
+            fi
+          fi
+
+          if any_label_present "milestone-delivery" "publication-change"; then
+            for file in "${MILESTONE_DELIVERY_REQUIRED_TOUCHES[@]}"; do
+              if ! file_changed "$file"; then
+                echo "❌ 'milestone-delivery' or 'publication-change' requires this file to be updated: $file"
+                exit 1
+              fi
+            done
+          fi
+
+          echo "✅ northstar-impact-check passed."
+
+      - name: Validate PRD acceptance criteria (milestone-delivery gate)
+        if: contains(toJson(github.event.pull_request.labels.*.name), 'milestone-delivery')
+        env:
+          PR_LABELS_JSON: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: |
+          set -euo pipefail
+
+          PRD="docs/PRD.md"
+
+          if [[ ! -f "$PRD" ]]; then
+            echo "❌ docs/PRD.md not found — cannot validate acceptance criteria"
+            exit 1
+          fi
+
+          echo "Checking PRD acceptance criteria for milestone-delivery PR..."
+
+          # Extract Section 6 (acceptance criteria table)
+          # Look for the product-level criteria table (pipe-delimited rows with status symbols)
+          CRITERIA_SECTION=$(awk '/^## [0-9]+[.)]\s+Acceptance/,/^## [0-9]+/' "$PRD" | head -n -1)
+
+          if [[ -z "$CRITERIA_SECTION" ]]; then
+            echo "⚠️  No acceptance criteria section found in docs/PRD.md"
+            echo "   Add a structured criteria table to Section 6 before marking milestone-delivery."
+            exit 1
+          fi
+
+          # Count table rows (lines with | and status symbols)
+          TABLE_ROWS=$(echo "$CRITERIA_SECTION" | grep -E "^\|" | grep -v "^|\s*#\|^|\s*-" | grep -E "⬜|🔄|✅|❌" || true)
+          ROW_COUNT=$(echo "$TABLE_ROWS" | grep -c "." || true)
+
+          if [[ "$ROW_COUNT" -eq 0 ]]; then
+            echo "❌ PRD Section 6 has no machine-verifiable acceptance criteria rows."
+            echo "   Add criteria with status symbols (⬜ 🔄 ✅ ❌) before milestone-delivery."
+            exit 1
+          fi
+
+          # Block if any criteria are still ⬜ (not started) on a milestone-delivery PR
+          INCOMPLETE=$(echo "$TABLE_ROWS" | grep "⬜" || true)
+          if [[ -n "$INCOMPLETE" ]]; then
+            echo "❌ milestone-delivery PR has incomplete acceptance criteria (⬜ = not started):"
+            echo "$INCOMPLETE"
+            echo ""
+            echo "All criteria must be ✅ verified before marking milestone-delivery."
+            echo "Update criteria status in docs/PRD.md Section 6 before merging."
+            exit 1
+          fi
+
+          # Warn on any 🔄 in-progress criteria (soft warning, not a block)
+          IN_PROGRESS=$(echo "$TABLE_ROWS" | grep "🔄" || true)
+          if [[ -n "$IN_PROGRESS" ]]; then
+            echo "⚠️  Some criteria are still in-progress (🔄). Verify these are acceptable before merging:"
+            echo "$IN_PROGRESS"
+          fi
+
+          echo "✅ PRD acceptance criteria check passed ($ROW_COUNT criteria reviewed)."
+
+      - name: Validate GPS output log (milestone-delivery gate)
+        if: contains(toJson(github.event.pull_request.labels.*.name), 'milestone-delivery')
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          OUTPUT_SPEC="docs/MILESTONE_OUTPUT_SPEC.md"
+          MILESTONES="docs/MILESTONES.md"
+
+          if [[ ! -f "$OUTPUT_SPEC" ]]; then
+            echo "❌ docs/MILESTONE_OUTPUT_SPEC.md not found"
+            exit 1
+          fi
+
+          echo "Checking GPS output log for milestone-delivery PR..."
+
+          # Find milestones marked as 'delivered' in this PR's changes
+          git fetch origin "$BASE_REF" --depth=1
+          MILESTONES_DIFF=$(git diff "origin/$BASE_REF...$HEAD_SHA" -- "$MILESTONES" 2>/dev/null || true)
+
+          # Look for lines newly marked as delivered (added lines with 'delivered')
+          NEWLY_DELIVERED=$(echo "$MILESTONES_DIFF" | grep "^+" | grep -v "^+++" | grep -iE "status.*delivered|delivered.*status" || true)
+
+          if [[ -z "$NEWLY_DELIVERED" ]]; then
+            echo "ℹ️  No newly-delivered milestones detected in MILESTONES.md diff."
+            echo "   If this is a delivery PR, ensure the milestone status is updated to 'delivered'."
+          else
+            echo "Newly delivered milestones found:"
+            echo "$NEWLY_DELIVERED"
+            echo ""
+
+            # Check that MILESTONE_OUTPUT_SPEC.md output log was also updated in this PR
+            OUTPUT_SPEC_CHANGED=$(git diff --name-only "origin/$BASE_REF...$HEAD_SHA" | grep -x "$OUTPUT_SPEC" || true)
+
+            if [[ -z "$OUTPUT_SPEC_CHANGED" ]]; then
+              echo "❌ Milestone marked 'delivered' but MILESTONE_OUTPUT_SPEC.md output log was not updated."
+              echo ""
+              echo "Before merging a milestone-delivery PR:"
+              echo "  1. Generate the required outputs (README update + Discord blurb)"
+              echo "  2. Add an entry to the output log table in docs/MILESTONE_OUTPUT_SPEC.md"
+              echo "  3. Include the output artifacts or commit references in the entry"
+              echo ""
+              echo "See docs/MILESTONE_OUTPUT_SPEC.md for the required output format."
+              exit 1
+            fi
+
+            # Check that the output log table has at least one new row (+ line in diff with pipe chars)
+            OUTPUT_DIFF=$(git diff "origin/$BASE_REF...$HEAD_SHA" -- "$OUTPUT_SPEC" 2>/dev/null || true)
+            NEW_LOG_ROWS=$(echo "$OUTPUT_DIFF" | grep "^+" | grep -v "^+++" | grep "|" | grep -v "^|.*---|" || true)
+
+            if [[ -z "$NEW_LOG_ROWS" ]]; then
+              echo "❌ docs/MILESTONE_OUTPUT_SPEC.md was updated but no new output log table row was added."
+              echo "   Add a row to the '## Output log' table for this milestone delivery."
+              exit 1
+            fi
+
+            echo "Output log entry found:"
+            echo "$NEW_LOG_ROWS"
+          fi
+
+          echo "✅ GPS output log check passed."
