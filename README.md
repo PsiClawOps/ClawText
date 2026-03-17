@@ -140,6 +140,15 @@ This isn't a summary or a copy of messages. A ClawBridge packet carries the know
 
 ClawText remembers durable knowledge. ClawBridge moves active context. Both are required for true continuity.
 
+### Lane 5 — Documentation / Library
+**trusted docs → named collection → reference retrieval**
+
+When you start using something new — like Proxmox, Tailscale, or internal platform docs — ClawText can ingest that documentation into a named library collection and make it retrievable as stable reference knowledge.
+
+This lane is agent-led and manifest-backed: the operator asks for a library import, the agent creates or updates the collection manifest, imports the source set, builds the library index, and future reference-style questions prefer that trusted corpus over random general memory. Collections can also gain curated start-here entries and local overlays for environment-specific notes.
+
+This keeps upstream truth, local operating reality, and operational lessons separate — while still making all three retrievable at the right time.
+
 ### Memory layers
 
 | Layer | What it holds | Latency | Durability |

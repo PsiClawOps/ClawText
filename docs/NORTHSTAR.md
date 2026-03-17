@@ -278,6 +278,18 @@ Phase 3 should support both:
 - **curated library entries** — reviewed summaries/start-here records built on top of those corpora
 - **optional overlays** — local environment notes that adapt official guidance to operator reality
 
+**Phase 3 progress update:**
+The Library Lane is now past pure planning and into working implementation. Current proven pieces include:
+- manifest-backed collection definitions
+- library runtime paths under `state/clawtext/prod/library/`
+- collection ingest for trusted doc sources
+- library index build/output
+- prompt-time preference for library results on reference-style queries
+- passing smoke validation using the official Proxmox VE 9.1 docs as the first external reference corpus
+
+**Northstar rule:**
+Phase 3 remains post-2.0 strategic expansion, but product canon should now treat Library Lane as an active implementation track rather than a speculative idea.
+
 ---
 
 ## VIII. Success Metrics & Northstar Vision

@@ -10,8 +10,20 @@ ClawText is the unified memory platform for OpenClaw. It captures useful knowled
 2. **Ingest** — turbocharge specific threads, docs, repos, URLs, JSON, and exports
 3. **Recall** — retrieve the best context for the current query
 4. **Curation** — score, summarize, promote, archive, and maintain memory quality
-5. **Publish** — installation, validation, packaging, health, and documentation
-6. **Actions** *(optional subsystem)* — route actionable captures to safe handlers
+5. **Library** — retain trusted documentation collections, curated entries, and local overlays as reference-grade memory
+6. **Publish** — installation, validation, packaging, health, and documentation
+7. **Actions** *(optional subsystem)* — route actionable captures to safe handlers
+
+## Library Lane update
+
+Library is no longer just a roadmap note. The current implementation direction now includes:
+- named collection manifests for trusted corpora
+- runtime ingest into `state/clawtext/prod/library/collections/`
+- library index generation under `state/clawtext/prod/library/indexes/`
+- prompt-time preference for Library material on reference-style queries
+- an agent-led import workflow backed by manifests and explicit trust metadata
+
+This means ClawText can now begin to act as a stable reference-memory system for external docs such as official Proxmox documentation, while still keeping operational learning and continuity separate.
 
 ## Core Principle
 
