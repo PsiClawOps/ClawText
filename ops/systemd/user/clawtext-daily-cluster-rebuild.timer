@@ -1,0 +1,10 @@
+[Unit]
+Description=Run ClawText daily cluster rebuild at 02:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+Persistent=true
+Unit=clawtext-daily-cluster-rebuild.service
+
+[Install]
+WantedBy=timers.target

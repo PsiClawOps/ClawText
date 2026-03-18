@@ -1,0 +1,12 @@
+[Unit]
+Description=Run ClawText extract-buffer every 20 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=20min
+AccuracySec=1min
+Persistent=true
+Unit=clawtext-extract-buffer.service
+
+[Install]
+WantedBy=timers.target
