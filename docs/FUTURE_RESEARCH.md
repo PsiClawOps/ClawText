@@ -77,6 +77,17 @@ _Ideas extracted from ecosystem review. All local-only compatible. Review period
 **Effort:** Small — 3-line guard clause
 **Priority:** Medium — reduces noise, saves compute
 
+### 9. Recency & Continuity Slots
+**What:** Add dedicated compositor slots for:
+- `operator-recall-anchor` — explicit user continuity rescue cues
+- `recent-thread-focus` — live thematic center of the current thread
+- `unresolved-now` — active open loops not yet closed
+**Why it matters:** Durable memory can be correct but still feel amnesic if the prompt loses the recent shape of the work. Recency is not just a score; it's a first-class continuity layer.
+**Local adaptation:** Build as slot providers / protected slot classes inside Clawptimization. Keep global `minScore` stable; use targeted continuity lanes instead of globally lowering thresholds.
+**Spec:** `docs/RECENCY_CONTINUITY_SLOT_SPEC.md`
+**Effort:** Medium
+**Priority:** HIGH — strong fit for ClawText's compositor architecture and directly addresses in-thread continuity failures like dropped `dfree` recall hints.
+
 ---
 
 ## Research Queue Summary
