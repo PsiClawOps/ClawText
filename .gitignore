@@ -42,3 +42,6 @@ __pycache__/
 *.pyc
 venv/
 cognee/venv/
+
+# Mikk internal
+.mikk/

@@ -83,12 +83,24 @@ export function resolveAgentIdentity(workspacePath: string, config?: ClawTextMul
 }
 
 /**
- * Load multi-agent config from openclaw.json
+ * Load multi-agent config from openclaw.json or environment variables
  * 
  * Uses a walk-up approach to find the config file, starting from the workspace directory.
  * Falls back to ~/.openclaw/openclaw.json as the canonical location.
+ * Also checks environment variables for activation.
  */
 export function loadMultiAgentConfig(workspacePath: string): ClawTextMultiAgentConfig {
+  // Check env vars first (explicit override)
+  const envEnabled = process.env.CLAWTEXT_MULTIAGENT_ENABLED;
+  const envVisibility = process.env.CLAWTEXT_DEFAULT_VISIBILITY;
+  
+  if (envEnabled === 'true') {
+    return {
+      enabled: true,
+      defaultVisibility: (envVisibility as any) || 'private',
+    };
+  }
+
   // Strategy: Walk up from workspace until we find openclaw.json
   // Fall back to canonical ~/.openclaw/openclaw.json
   
