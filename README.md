@@ -189,9 +189,13 @@ Every decision is logged and auditable. Nothing is lost — pruned content is al
 
 ### Context Protection — Tiered Compression
 
-The problem with naive compression: when context fills up, current engines compress the entire window indiscriminately. They treat an agent's earned decisions the same as throwaway tool output. High-value content gets lost in the same compression pass as noise.
+Most approaches to context management treat the prompt as a data structure to be algorithmically optimized — find the best token arrangement for the current task. ClawText takes a different approach.
 
-ClawText's slot compositor classifies every piece of context and makes content-aware compression decisions:
+**ClawText isn't an optimization algorithm. It's an environment for a productive worker.**
+
+A productive agent isn't one that produces the best single output — it's one that maintains quality, consistency, and judgment across weeks of work. The tiered compression model exists to preserve the conditions that make an agent productive over time, while shedding the noise that accumulates in any long-running work session.
+
+The slot compositor classifies every piece of context and makes content-aware compression decisions:
 
 | Tier | Compression behavior | Examples |
 |---|---|---|
