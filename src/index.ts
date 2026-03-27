@@ -17,6 +17,7 @@ import { extractIdentityAnchorContent } from './slots/identity-anchor-provider';
 import { wrapWithAgentScope } from './providers/agent-scoped-provider';
 import { registerSessionIntelligenceEngine } from './session-intelligence';
 import type { SessionIntelligenceConfig } from './session-intelligence';
+import { resolveAgentIdFromSessionKey, resolveAgentWorkspaceDir } from 'openclaw/plugin-sdk/agent-runtime';
 
 export { ClawTextInjectionPlugin, ClawTextRAG };
 export { cleanQueryForSearch } from './rag';
@@ -59,9 +60,34 @@ export * from './peer/index';
 export * from './extraction/index';
 export * from './session-intelligence';
 
-const WORKSPACE = path.join(os.homedir(), '.openclaw', 'workspace');
-const OPT_CONFIG_PATH = path.join(WORKSPACE, 'state', 'clawtext', 'prod', 'optimize-config.json');
-const OPT_LOG_PATH = path.join(WORKSPACE, 'state', 'clawtext', 'prod', 'optimization-log.jsonl');
+// Default workspace — used for paths that don't have a per-session context (logs, config)
+const DEFAULT_WORKSPACE = path.join(os.homedir(), '.openclaw', 'workspace');
+const OPT_CONFIG_PATH = path.join(DEFAULT_WORKSPACE, 'state', 'clawtext', 'prod', 'optimize-config.json');
+const OPT_LOG_PATH = path.join(DEFAULT_WORKSPACE, 'state', 'clawtext', 'prod', 'optimization-log.jsonl');
+
+/**
+ * Resolve the active agent's workspace directory from the session key.
+ * Falls back to the default workspace for single-agent or unresolvable sessions.
+ *
+ * Uses openclaw/plugin-sdk/agent-runtime to derive workspace from agentId,
+ * which correctly resolves per-agent workspace overrides (e.g. workspace-council/forge).
+ * This fixes the identity anchor injection bug where WORKSPACE was hardcoded
+ * to the main agent workspace, causing all council agents to receive default/worker identity.
+ */
+function resolveWorkspaceForSession(sessionKey: string | undefined, cfg?: unknown): string {
+  try {
+    if (sessionKey) {
+      const agentId = resolveAgentIdFromSessionKey(sessionKey);
+      if (agentId) {
+        const resolved = resolveAgentWorkspaceDir(cfg as Parameters<typeof resolveAgentWorkspaceDir>[0], agentId);
+        if (resolved) return resolved;
+      }
+    }
+  } catch {
+    // fall through to default
+  }
+  return DEFAULT_WORKSPACE;
+}
 
 function logPluginDiagnostic(entry: Record<string, unknown>): void {
   try {
@@ -245,8 +271,10 @@ function runClawptimization(
   messages: unknown[],
   channelId: string,
   sessionKey: string,
+  cfg?: unknown,
 ): { prependContext?: string } | undefined {
   const config = loadOptimizeConfig();
+  const WORKSPACE = resolveWorkspaceForSession(sessionKey, cfg);
 
   if (!config.enabled || config.strategy === 'passthrough') {
     logPluginDiagnostic({ type: 'skip', reason: !config.enabled ? 'disabled' : 'passthrough', channel: channelId });
@@ -513,7 +541,7 @@ function isSessionIntelligenceEnabled(config: unknown): boolean {
 
 function resolveSessionIntelligenceConfig(config: unknown): SessionIntelligenceConfig {
   const base: SessionIntelligenceConfig = {
-    workspacePath: WORKSPACE,
+    workspacePath: DEFAULT_WORKSPACE,
     defaultTokenBudget: 128_000,
     compactor: {
       summarizationModel: 'anthropic/claude-haiku-4-5',
@@ -641,7 +669,7 @@ export default {
           const channelId = ctx?.messageChannel || 'unknown';
           const sessionKey = ctx?.sessionKey || ctx?.sessionId || `session-${Date.now()}`;
 
-          const optimizeResult = runClawptimization(promptAfterRag, messages, channelId, sessionKey);
+          const optimizeResult = runClawptimization(promptAfterRag, messages, channelId, sessionKey, api.config);
 
           if (optimizeResult?.prependContext) {
             return {
