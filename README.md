@@ -191,9 +191,11 @@ Every decision is logged and auditable. Nothing is lost — pruned content is al
 
 Most approaches to context management treat the prompt as a data structure to be algorithmically optimized — find the best token arrangement for the current task. ClawText takes a different approach.
 
-**ClawText isn't an optimization algorithm. It's an environment for a productive worker.**
+**ClawText isn't an optimization algorithm. It's a cognitive environment that keeps agents from collapsing back to the training weights.**
 
-A productive agent isn't one that produces the best single output — it's one that maintains quality, consistency, and judgment across weeks of work. The tiered compression model exists to preserve the conditions that make an agent productive over time, while shedding the noise that accumulates in any long-running work session.
+Every LLM has a gravitational center: the generic baseline encoded in its training data. Under context pressure, agents revert to that baseline — your specialized reviewer becomes a generic assistant. ClawText's tiered compression exists to maintain the differentiation that produces innovative, high-quality output. Not just for one response, but across the entire working lifetime of an agent.
+
+For multi-agent systems, this is the difference between genuine diverse analysis and an echo chamber of the same model talking to itself.
 
 The slot compositor classifies every piece of context and makes content-aware compression decisions:
 
