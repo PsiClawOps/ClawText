@@ -9,7 +9,7 @@
 
 import type { DatabaseSync } from 'node:sqlite';
 
-const LATEST_SCHEMA_VERSION = 9;
+const LATEST_SCHEMA_VERSION = 10;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -227,6 +227,29 @@ function applyVersion9Migration(db: DatabaseSync): void {
   }
 }
 
+function applyVersion10Migration(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tool_call_meta (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      call_id TEXT,
+      call_type TEXT NOT NULL,
+      resource_uri TEXT,
+      result_tokens INTEGER,
+      turn_number INTEGER NOT NULL,
+      consumed INTEGER NOT NULL DEFAULT 0,
+      consumption_turn INTEGER,
+      decay_eligible_turn INTEGER,
+      externalized INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tool_call_meta_conv_decay ON tool_call_meta(conversation_id, decay_eligible_turn, consumed, externalized);');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_tool_call_meta_message ON tool_call_meta(message_id);');
+}
+
 export function migrate(db: DatabaseSync): void {
   createBaseSchema(db);
 
@@ -314,6 +337,14 @@ export function migrate(db: DatabaseSync): void {
     db
       .prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)')
       .run(9, nowIso());
+    version = 9;
+  }
+
+  if (version < 10) {
+    applyVersion10Migration(db);
+    db
+      .prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)')
+      .run(10, nowIso());
   }
 }
 

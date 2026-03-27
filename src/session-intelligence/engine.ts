@@ -26,6 +26,7 @@ import { openDatabase, withTransaction } from './db';
 import { estimateTokens, persistMessage, persistMessageParts } from './ingest';
 import { buildPressureReading, computePressureSignals } from './pressure';
 import { runNoiseSweep, runToolDecay } from './proactive-pass';
+import { DECAY_WINDOWS, detectCallType, detectConsumption, insertToolCallMeta } from './tool-tracker';
 import { extractStateFromMessage } from './state-extraction';
 import { getStateSlot, kernelSlotsPresent, upsertStateSlot } from './state-slots';
 import {
@@ -258,6 +259,33 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
           message: params.message,
           contentType,
         });
+
+        if (contentType === 'tool_result') {
+          const storedMessage = db
+            .prepare('SELECT role, content, token_count FROM messages WHERE id = ? LIMIT 1')
+            .get(messageId) as { role: string; content: string; token_count: number | null } | undefined;
+
+          if (storedMessage) {
+            const callType = detectCallType(storedMessage.content, storedMessage.role);
+            const resultTokens = typeof storedMessage.token_count === 'number'
+              ? storedMessage.token_count
+              : estimateTokens(storedMessage.content);
+            const decayEligibleTurn = index + DECAY_WINDOWS[callType];
+
+            insertToolCallMeta(db, {
+              messageId: String(messageId),
+              conversationId: params.sessionId,
+              callType,
+              resultTokens,
+              turnNumber: index,
+              decayEligibleTurn,
+            });
+
+            const consumptionWindow = 5;
+            const scanAfterTurn = Math.max(-1, index - consumptionWindow);
+            detectConsumption(db, params.sessionId, scanAfterTurn, consumptionWindow);
+          }
+        }
       });
 
       const triggerResult = evaluateTrigger({

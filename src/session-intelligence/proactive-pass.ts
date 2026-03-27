@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { withTransaction } from './db';
 import { externalizePayload } from './large-file';
 import { insertPayloadRef } from './payload-store';
+import { getDecayEligibleMessages, markExternalized } from './tool-tracker';
 
 export type ProactivePassResult = {
   messagesMarked: number;
@@ -94,7 +95,29 @@ export function runToolDecay(
   const maxIndex = getMaxMessageIndex(db, dbConversationId);
   const cutoffIndexExclusive = maxIndex - safeWindow;
 
-  const candidates = db
+  const metaCandidates = getDecayEligibleMessages(db, conversationId, maxIndex);
+  const primaryCandidates: Array<{ id: number; content: string; hasMeta: boolean }> = [];
+
+  for (const candidate of metaCandidates) {
+    const parsedId = Number(candidate.messageId);
+    if (!Number.isFinite(parsedId)) continue;
+
+    const row = db
+      .prepare(
+        `SELECT id, content
+           FROM messages
+          WHERE id = ?
+            AND conversation_id = ?
+            AND content_type = 'tool_result'
+            AND (truncated_payload_ref IS NULL OR truncated_payload_ref = '')`,
+      )
+      .get(parsedId, dbConversationId) as { id: number; content: string } | undefined;
+
+    if (!row) continue;
+    primaryCandidates.push({ id: row.id, content: row.content, hasMeta: true });
+  }
+
+  const fallbackCandidates = db
     .prepare(
       `SELECT id, content
          FROM messages
@@ -103,9 +126,19 @@ export function runToolDecay(
           AND message_index < ?
           AND length(content) > 2000
           AND (truncated_payload_ref IS NULL OR truncated_payload_ref = '')
+          AND NOT EXISTS (
+            SELECT 1
+              FROM tool_call_meta t
+             WHERE t.message_id = CAST(messages.id AS TEXT)
+          )
         ORDER BY message_index ASC`,
     )
     .all(dbConversationId, cutoffIndexExclusive) as Array<{ id: number; content: string }>;
+
+  const candidates = [
+    ...primaryCandidates,
+    ...fallbackCandidates.map((row) => ({ ...row, hasMeta: false })),
+  ];
 
   if (candidates.length === 0) {
     return {
@@ -146,6 +179,10 @@ export function runToolDecay(
               WHERE id = ?`,
           )
           .run(compactToken, estimateTokens(compactToken.length), payloadRef.refId, row.id);
+
+        if (row.hasMeta) {
+          markExternalized(db, String(row.id));
+        }
       });
 
       messagesMarked += 1;

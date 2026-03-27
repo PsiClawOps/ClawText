@@ -88,6 +88,23 @@ function readContent(message: unknown): string {
   return stringifyUnknown(message.content ?? message);
 }
 
+function hasToolCalls(message: unknown): boolean {
+  if (!isRecord(message)) return false;
+
+  const directToolCalls = message.tool_calls;
+  if (Array.isArray(directToolCalls) && directToolCalls.length > 0) return true;
+
+  if (Array.isArray(message.parts)) {
+    return message.parts.some((part) => {
+      if (!isRecord(part)) return false;
+      const partToolCalls = part.tool_calls;
+      return Array.isArray(partToolCalls) && partToolCalls.length > 0;
+    });
+  }
+
+  return false;
+}
+
 function hasDecisionPattern(content: string): boolean {
   return DECISION_PATTERNS.some((pattern) => pattern.test(content));
 }
@@ -109,6 +126,7 @@ export function classifyMessage(message: unknown): ContentType {
 
   if (
     role === 'tool'
+    || (role === 'assistant' && hasToolCalls(message))
     || content.includes('<tool_result>')
     || content.includes('"type":"tool_result"')
   ) {

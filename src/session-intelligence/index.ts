@@ -46,4 +46,13 @@ export { runNoiseSweep, runToolDecay } from './proactive-pass';
 export { search, describe, expand } from './recall';
 export { shouldExternalize, externalizePayload, recoverPayload } from './large-file';
 export { insertPayloadRef, getPayloadRef, listPayloadRefs, markPayloadRefExpired } from './payload-store';
+export {
+  detectCallType,
+  insertToolCallMeta,
+  markConsumed,
+  getDecayEligibleMessages,
+  markExternalized,
+  detectConsumption,
+  DECAY_WINDOWS,
+} from './tool-tracker';
 export type { SessionIntelligenceConfig };
