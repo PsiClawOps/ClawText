@@ -6,7 +6,6 @@
  */
 
 import type { DatabaseSync } from 'node:sqlite';
-import { ContentType } from './types';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -66,31 +65,6 @@ function resolveRole(message: unknown): string {
   if (!isRecord(message)) return 'unknown';
   const role = message.role;
   return typeof role === 'string' && role.trim().length > 0 ? role : 'unknown';
-}
-
-function detectHasPartType(message: unknown, expectedTypes: string[]): boolean {
-  if (!isRecord(message)) return false;
-
-  const arrays: unknown[] = [];
-  if (Array.isArray(message.parts)) arrays.push(...message.parts);
-  if (Array.isArray(message.content)) arrays.push(...message.content);
-
-  for (const entry of arrays) {
-    if (!isRecord(entry)) continue;
-    const candidate = entry.type;
-    if (typeof candidate !== 'string') continue;
-    if (expectedTypes.includes(candidate)) return true;
-  }
-
-  return false;
-}
-
-function classifyContentType(message: unknown): ContentType {
-  const role = resolveRole(message);
-  if (role === 'system') return ContentType.System;
-  if (detectHasPartType(message, ['tool-call', 'tool_result', 'tool-result', 'tool'])) return ContentType.ToolOutput;
-  if (detectHasPartType(message, ['file', 'image', 'attachment'])) return ContentType.File;
-  return ContentType.Active;
 }
 
 function coerceRowId(value: unknown): number {
@@ -164,10 +138,10 @@ export function persistMessage(
   message: unknown,
   index: number,
   isHeartbeat: boolean,
+  contentType: string = 'active',
 ): number {
   const role = resolveRole(message);
   const content = normalizeMessageContent(message);
-  const contentType = classifyContentType(message);
   const tokenCount = estimateTokens(content);
 
   const result = db

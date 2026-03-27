@@ -21,8 +21,10 @@ import {
   loadAcaFiles,
 } from './aca';
 import { runCompaction, resolveCompactorConfig, SummarizationTracker } from './compactor';
+import { classifyMessage, type ContentType } from './content-type';
 import { openDatabase, withTransaction } from './db';
 import { estimateTokens, persistMessage, persistMessageParts } from './ingest';
+import { extractStateFromMessage } from './state-extraction';
 import { getStateSlot, kernelSlotsPresent, upsertStateSlot } from './state-slots';
 import {
   evaluateTrigger,
@@ -55,8 +57,10 @@ type SubagentSpawnPreparation = {
 };
 
 type StoredMessage = {
+  message_index: number;
   role: string;
   content: string;
+  content_type: ContentType;
   token_count: number | null;
 };
 
@@ -97,6 +101,22 @@ function messageToText(message: unknown): string {
   }
 
   return JSON.stringify(candidate.content ?? message);
+}
+
+function getMessageContentTypes(db: DatabaseSync, conversationId: number): Map<number, ContentType> {
+  const rows = db.prepare(
+    `SELECT message_index, content_type FROM messages WHERE conversation_id = ? ORDER BY message_index`,
+  ).all(conversationId) as Array<{ message_index: number; content_type: string | null }>;
+
+  return new Map(rows.map((row) => [row.message_index, (row.content_type as ContentType) ?? 'active']));
+}
+
+function estimateStoredMessageTokens(row: StoredMessage): number {
+  if (typeof row.token_count === 'number' && row.token_count > 0) {
+    return row.token_count;
+  }
+
+  return estimateTokens(row.content);
 }
 
 export function createSessionIntelligenceEngine(config: SessionIntelligenceConfig): ContextEngine {
@@ -209,8 +229,23 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
 
       withTransaction(db, () => {
         const index = nextMessageIndex(conversationId);
-        const messageId = persistMessage(db, conversationId, params.message, index, params.isHeartbeat === true);
+        const classifiedContentType = classifyMessage(params.message);
+        const contentType: ContentType = params.isHeartbeat === true ? 'noise' : classifiedContentType;
+        const messageId = persistMessage(
+          db,
+          conversationId,
+          params.message,
+          index,
+          params.isHeartbeat === true,
+          contentType,
+        );
         persistMessageParts(db, messageId, params.message);
+        extractStateFromMessage({
+          db,
+          conversationId,
+          message: params.message,
+          contentType,
+        });
       });
 
       const currentTokenCount = estimatePressureFromDb(conversationId);
@@ -271,8 +306,23 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
         let count = 0;
 
         for (const message of params.messages) {
-          const messageId = persistMessage(db, conversationId, message, index, params.isHeartbeat === true);
+          const classifiedContentType = classifyMessage(message);
+          const contentType: ContentType = params.isHeartbeat === true ? 'noise' : classifiedContentType;
+          const messageId = persistMessage(
+            db,
+            conversationId,
+            message,
+            index,
+            params.isHeartbeat === true,
+            contentType,
+          );
           persistMessageParts(db, messageId, message);
+          extractStateFromMessage({
+            db,
+            conversationId,
+            message,
+            contentType,
+          });
           index += 1;
           count += 1;
         }
@@ -304,47 +354,105 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
       const overlaySlot = getStateSlot(db, conversationId, 'active_overlay');
       const overlayTokens = overlaySlot ? estimateTokens(overlaySlot.content) : 0;
 
-      const historyBudget = budget - kernelTokens - overlayTokens;
+      const historyBudget = Math.max(0, budget - kernelTokens - overlayTokens);
+      const priorityBudget = Math.floor(historyBudget * 0.30);
 
       const rows = db
         .prepare(
-          `SELECT role, content, token_count
+          `SELECT message_index, role, content, content_type, token_count
              FROM messages
             WHERE conversation_id = ?
-            ORDER BY message_index DESC`,
+            ORDER BY message_index ASC`,
         )
-        .all(conversationId) as StoredMessage[];
+        .all(conversationId) as Array<{
+          message_index: number;
+          role: string;
+          content: string;
+          content_type: string | null;
+          token_count: number | null;
+        }>;
 
-      const selected: Array<{ role: string; content: string }> = [];
+      const storedMessages: StoredMessage[] = rows.map((row) => ({
+        message_index: row.message_index,
+        role: row.role,
+        content: row.content,
+        content_type: (row.content_type as ContentType) ?? 'active',
+        token_count: row.token_count,
+      }));
+
+      const selectedByIndex = new Map<number, StoredMessage>();
       let historyTokens = 0;
+      let priorityTokens = 0;
 
-      if (historyBudget > 0) {
-        for (const row of rows) {
-          const rowTokens = typeof row.token_count === 'number' && row.token_count > 0
-            ? row.token_count
-            : estimateTokens(row.content);
+      const priorityCandidates = storedMessages
+        .filter((row) => row.content_type === 'anchor' || row.content_type === 'decision')
+        .sort((a, b) => b.message_index - a.message_index);
 
-          if (historyTokens + rowTokens > historyBudget && selected.length > 0) {
-            break;
-          }
+      for (const row of priorityCandidates) {
+        const rowTokens = estimateStoredMessageTokens(row);
 
-          if (historyTokens + rowTokens > historyBudget && selected.length === 0) {
-            selected.push({ role: row.role, content: row.content });
-            historyTokens += rowTokens;
-            break;
-          }
+        if (priorityTokens + rowTokens > priorityBudget && selectedByIndex.size > 0) {
+          break;
+        }
 
-          selected.push({ role: row.role, content: row.content });
+        if (historyTokens + rowTokens > historyBudget && selectedByIndex.size > 0) {
+          break;
+        }
+
+        if (historyTokens + rowTokens > historyBudget && selectedByIndex.size === 0) {
+          selectedByIndex.set(row.message_index, row);
           historyTokens += rowTokens;
+          priorityTokens += rowTokens;
+          break;
+        }
+
+        selectedByIndex.set(row.message_index, row);
+        historyTokens += rowTokens;
+        priorityTokens += rowTokens;
+      }
+
+      const fillCandidates = storedMessages
+        .filter((row) => row.content_type === 'active' || row.content_type === 'tool_result')
+        .sort((a, b) => b.message_index - a.message_index);
+
+      for (const row of fillCandidates) {
+        if (historyTokens >= historyBudget) break;
+        if (selectedByIndex.has(row.message_index)) continue;
+
+        const rowTokens = estimateStoredMessageTokens(row);
+
+        if (historyTokens + rowTokens > historyBudget && selectedByIndex.size > 0) {
+          continue;
+        }
+
+        selectedByIndex.set(row.message_index, row);
+        historyTokens += rowTokens;
+
+        if (historyTokens > historyBudget && selectedByIndex.size === 1) {
+          break;
         }
       }
 
-      const historyMessages: unknown[] = selected.length > 0
-        ? selected.reverse()
-        : (Array.isArray(params.messages) ? params.messages : []);
+      const selected = [...selectedByIndex.values()].sort((a, b) => a.message_index - b.message_index);
 
-      const fallbackHistoryTokens = selected.length > 0 ? 0 : estimateCurrentPressure(historyMessages);
-      const effectiveHistoryTokens = selected.length > 0 ? historyTokens : fallbackHistoryTokens;
+      const historyMessagesFromDb: unknown[] = selected.map((row) => ({
+        role: row.role,
+        content: row.content,
+      }));
+
+      const runtimeMessages = Array.isArray(params.messages) ? params.messages : [];
+      const contentTypeByIndex = getMessageContentTypes(db, conversationId);
+      const fallbackHistoryMessages: unknown[] = runtimeMessages.filter((message, index) => {
+        const mappedType = contentTypeByIndex.get(index) ?? classifyMessage(message);
+        return mappedType !== 'noise' && mappedType !== 'resolved';
+      });
+
+      const historyMessages: unknown[] = historyMessagesFromDb.length > 0
+        ? historyMessagesFromDb
+        : fallbackHistoryMessages;
+
+      const fallbackHistoryTokens = historyMessagesFromDb.length > 0 ? 0 : estimateCurrentPressure(historyMessages);
+      const effectiveHistoryTokens = historyMessagesFromDb.length > 0 ? historyTokens : fallbackHistoryTokens;
 
       const assembledMessages: unknown[] = [
         {
@@ -376,7 +484,13 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
       };
     } catch (error) {
       console.warn(`[${ENGINE_ID}] assemble failed: ${error instanceof Error ? error.message : String(error)}`);
-      const fallbackMessages = Array.isArray(params.messages) ? params.messages : [];
+      const fallbackMessages = Array.isArray(params.messages)
+        ? params.messages.filter((message) => {
+          const contentType = classifyMessage(message);
+          return contentType !== 'noise' && contentType !== 'resolved';
+        })
+        : [];
+
       return {
         messages: fallbackMessages as AssembleResult['messages'],
         estimatedTokens: estimateCurrentPressure(fallbackMessages),

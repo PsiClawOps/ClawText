@@ -9,7 +9,7 @@
 
 import type { DatabaseSync } from 'node:sqlite';
 
-const LATEST_SCHEMA_VERSION = 4;
+const LATEST_SCHEMA_VERSION = 5;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -145,6 +145,26 @@ function applyVersion4Migration(db: DatabaseSync): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_compaction_events_conversation ON compaction_events(conversation_id, triggered_at DESC, id DESC);');
 }
 
+function applyVersion5Migration(db: DatabaseSync): void {
+  try {
+    db.exec("ALTER TABLE messages ADD COLUMN content_type TEXT NOT NULL DEFAULT 'active'");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.toLowerCase().includes('duplicate column name')) {
+      throw error;
+    }
+  }
+
+  try {
+    db.exec('ALTER TABLE summaries ADD COLUMN source_content_types TEXT');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.toLowerCase().includes('duplicate column name')) {
+      throw error;
+    }
+  }
+}
+
 export function migrate(db: DatabaseSync): void {
   createBaseSchema(db);
 
@@ -192,6 +212,14 @@ export function migrate(db: DatabaseSync): void {
     db
       .prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)')
       .run(4, nowIso());
+    version = 4;
+  }
+
+  if (version < 5) {
+    applyVersion5Migration(db);
+    db
+      .prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)')
+      .run(5, nowIso());
   }
 }
 

@@ -6,18 +6,7 @@
  */
 
 import type { CompactorConfig } from './compactor';
-
-export enum ContentType {
-  System = 'system',
-  Identity = 'identity',
-  Decision = 'decision',
-  Anchor = 'anchor',
-  Active = 'active',
-  Resolved = 'resolved',
-  Noise = 'noise',
-  ToolOutput = 'tool_output',
-  File = 'file',
-}
+import type { ContentType } from './content-type';
 
 export type ConversationRow = {
   id: number;

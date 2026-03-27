@@ -146,19 +146,42 @@ function chunkMessages<T>(items: T[], chunkSize: number): T[][] {
   return result;
 }
 
-function mergeSourceContentTypes(values: Array<string | null | undefined>): string {
+function collectDistinctContentTypes(values: Array<string | null | undefined>): string[] {
   const all = new Set<string>();
 
   for (const value of values) {
     if (typeof value !== 'string' || value.trim().length === 0) continue;
-    for (const token of value.split(',')) {
+
+    const trimmed = value.trim();
+
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed) as unknown;
+        if (Array.isArray(parsed)) {
+          for (const token of parsed) {
+            if (typeof token === 'string' && token.trim().length > 0) {
+              all.add(token.trim());
+            }
+          }
+          continue;
+        }
+      } catch {
+        // fall back to comma-delimited parsing for backward compatibility
+      }
+    }
+
+    for (const token of trimmed.split(',')) {
       const normalized = token.trim();
       if (normalized.length > 0) all.add(normalized);
     }
   }
 
-  if (all.size === 0) return 'active';
-  return [...all].sort().join(',');
+  if (all.size === 0) return ['active'];
+  return [...all].sort();
+}
+
+function serializeContentTypes(values: Array<string | null | undefined>): string {
+  return JSON.stringify(collectDistinctContentTypes(values));
 }
 
 function estimatePromptTokens(prompt: string): number {
@@ -215,7 +238,7 @@ function runDeterministicTruncation(
         WHERE conversation_id = ?
           AND is_heartbeat = 0
           AND COALESCE(summarized, 0) = 0
-          AND content_type NOT IN ('system', 'identity', 'decision', 'anchor')
+          AND content_type NOT IN ('decision', 'anchor')
         ORDER BY message_index ASC`,
     )
     .all(conversationId) as Array<{ id: number; content: string; token_count: number | null }>;
@@ -328,8 +351,11 @@ export async function runLeafPass(
       continue;
     }
 
-    const sourceTypes = mergeSourceContentTypes(batch.map((message) => message.content_type));
-    createLeafSummary(db, conversationId, batch, summarized.summary, sourceTypes);
+    const sourceTypes = serializeContentTypes(batch.map((message) => message.content_type));
+    const summaryId = createLeafSummary(db, conversationId, batch, summarized.summary, sourceTypes);
+    db.prepare(
+      'UPDATE summaries SET source_content_types = ? WHERE id = ?',
+    ).run(sourceTypes, summaryId);
     markMessagesAsSummarized(db, batch.map((message) => message.id));
     summarizedCount += batch.length;
   }
@@ -376,8 +402,11 @@ export async function runCondensationPass(
     }
 
     const childIds = group.map((item) => item.id);
-    const sourceTypes = mergeSourceContentTypes(group.map((item) => item.source_content_types));
-    createCondensedSummary(db, conversationId, childIds, summarized.summary, sourceTypes);
+    const sourceTypes = serializeContentTypes(group.map((item) => item.source_content_types));
+    const summaryId = createCondensedSummary(db, conversationId, childIds, summarized.summary, sourceTypes);
+    db.prepare(
+      'UPDATE summaries SET source_content_types = ? WHERE id = ?',
+    ).run(sourceTypes, summaryId);
     condensedCount += 1;
   }
 

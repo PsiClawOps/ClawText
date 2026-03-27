@@ -24,5 +24,13 @@ export function registerSessionIntelligenceEngine(
 export { createSessionIntelligenceEngine };
 export { loadAcaFiles, buildKernelContent, buildOverlayContent } from './aca';
 export { upsertStateSlot, getStateSlot, getAllStateSlots, kernelSlotsPresent } from './state-slots';
+export {
+  classifyMessage,
+  extractDecisionText,
+  extractProblemText,
+  CONTENT_TYPE_PRIORITY,
+  CONTENT_TYPE_COMPACTION_ORDER,
+} from './content-type';
+export { extractStateFromMessage } from './state-extraction';
 export { evaluateTrigger, recordCompactionEvent, resolveTriggerConfig } from './trigger';
 export type { SessionIntelligenceConfig };
