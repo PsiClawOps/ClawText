@@ -17,7 +17,6 @@ import { extractIdentityAnchorContent } from './slots/identity-anchor-provider';
 import { wrapWithAgentScope } from './providers/agent-scoped-provider';
 import { registerSessionIntelligenceEngine } from './session-intelligence';
 import type { SessionIntelligenceConfig } from './session-intelligence';
-import { resolveAgentIdFromSessionKey, resolveAgentWorkspaceDir } from 'openclaw/plugin-sdk/agent-runtime';
 
 export { ClawTextInjectionPlugin, ClawTextRAG };
 export { cleanQueryForSearch } from './rag';
@@ -46,9 +45,6 @@ export * from './providers/index';
 export * from './providers/cross-session-provider';
 export * from './providers/situational-awareness-provider';
 export * from './providers/clawbridge-provider';
-export * from './providers/topic-anchor-provider';
-export * from './providers/advisor-provider';
-export * from './providers/session-matrix-provider';
 export * from './slots/index';
 export * from './slots/advisor';
 export * from './slots/sessionMatrix';
@@ -73,13 +69,19 @@ const OPT_LOG_PATH = path.join(DEFAULT_WORKSPACE, 'state', 'clawtext', 'prod', '
  * which correctly resolves per-agent workspace overrides (e.g. workspace-council/forge).
  * This fixes the identity anchor injection bug where WORKSPACE was hardcoded
  * to the main agent workspace, causing all council agents to receive default/worker identity.
+ *
+ * Uses api.runtime passed in at call time to avoid top-level static imports
+ * that aren't in openclaw's package.json exports map.
  */
-function resolveWorkspaceForSession(sessionKey: string | undefined, cfg?: unknown): string {
+function resolveWorkspaceForSession(sessionKey: string | undefined, api?: { runtime?: { agent?: { resolveAgentWorkspaceDir?: (cfg: unknown, agentId: string) => string | undefined; resolveAgentIdFromSessionKey?: (sessionKey: string) => string } } }, cfg?: unknown): string {
   try {
-    if (sessionKey) {
-      const agentId = resolveAgentIdFromSessionKey(sessionKey);
-      if (agentId) {
-        const resolved = resolveAgentWorkspaceDir(cfg as Parameters<typeof resolveAgentWorkspaceDir>[0], agentId);
+    if (sessionKey && api?.runtime?.agent) {
+      const agentRuntime = api.runtime.agent;
+      const agentId = typeof agentRuntime.resolveAgentIdFromSessionKey === 'function'
+        ? agentRuntime.resolveAgentIdFromSessionKey(sessionKey)
+        : undefined;
+      if (agentId && typeof agentRuntime.resolveAgentWorkspaceDir === 'function') {
+        const resolved = agentRuntime.resolveAgentWorkspaceDir(cfg, agentId);
         if (resolved) return resolved;
       }
     }
@@ -271,10 +273,11 @@ function runClawptimization(
   messages: unknown[],
   channelId: string,
   sessionKey: string,
+  api?: unknown,
   cfg?: unknown,
 ): { prependContext?: string } | undefined {
   const config = loadOptimizeConfig();
-  const WORKSPACE = resolveWorkspaceForSession(sessionKey, cfg);
+  const WORKSPACE = resolveWorkspaceForSession(sessionKey, api as Parameters<typeof resolveWorkspaceForSession>[1], cfg);
 
   if (!config.enabled || config.strategy === 'passthrough') {
     logPluginDiagnostic({ type: 'skip', reason: !config.enabled ? 'disabled' : 'passthrough', channel: channelId });
@@ -669,7 +672,7 @@ export default {
           const channelId = ctx?.messageChannel || 'unknown';
           const sessionKey = ctx?.sessionKey || ctx?.sessionId || `session-${Date.now()}`;
 
-          const optimizeResult = runClawptimization(promptAfterRag, messages, channelId, sessionKey, api.config);
+          const optimizeResult = runClawptimization(promptAfterRag, messages, channelId, sessionKey, api, api.config);
 
           if (optimizeResult?.prependContext) {
             return {
