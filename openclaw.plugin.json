@@ -6,7 +6,11 @@
   "hooks": [
     "./hooks/clawtext-optimize",
     "./hooks/clawtext-prune",
-    "./hooks/clawtext-prefetch"
+    "./hooks/clawtext-prefetch",
+    "./hooks/clawtext-checkpoint",
+    "./hooks/clawtext-extract",
+    "./hooks/clawtext-flush",
+    "./hooks/clawtext-restore"
   ],
   "configSchema": {
     "type": "object",
