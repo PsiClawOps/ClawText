@@ -65,6 +65,13 @@ export {
   computeDelta,
   processFileRead,
   buildResourceToken,
-} from './resource-versions';
-export type { DeltaType } from './resource-versions';
+} from './resource-versions.js';
+export type { DeltaType } from './resource-versions.js';
+export {
+  insertSlotAssociation,
+  getSlotAssociations,
+  getRecoveryPriority,
+  associateResourceWithSlots,
+} from './slot-associations.js';
+export type { RecoveryPriority, ResourceSlotAssociation } from './slot-associations.js';
 export type { SessionIntelligenceConfig };

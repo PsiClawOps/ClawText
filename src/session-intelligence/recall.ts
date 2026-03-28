@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { recoverPayload } from './large-file';
-import { getPayloadRef } from './payload-store';
+import { recoverPayload } from './large-file.js';
+import { getPayloadRef } from './payload-store.js';
+import { getRecoveryPriority } from './slot-associations.js';
+import type { RecoveryPriority } from './slot-associations.js';
 
 const DEFAULT_LIMIT = 10;
 const MAX_SNIPPET_LENGTH = 300;
@@ -50,6 +52,7 @@ export type ExpandResult =
     type: 'payload';
     refId: string;
     content: string;
+    recoveryPriority: RecoveryPriority;
   }
   | {
     type: 'missing';
@@ -475,10 +478,18 @@ export function expand(params: {
       };
     }
 
+    const rvRow = (params.db as DatabaseSync)
+      .prepare(`SELECT id FROM resource_versions WHERE ref_id = ? LIMIT 1`)
+      .get(targetId) as { id: number } | undefined;
+    const recoveryPriority: RecoveryPriority = rvRow
+      ? getRecoveryPriority(params.db as DatabaseSync, rvRow.id)
+      : 'normal';
+
     return {
       type: 'payload',
       refId: targetId,
       content,
+      recoveryPriority,
     };
   }
 

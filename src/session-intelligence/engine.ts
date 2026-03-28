@@ -26,7 +26,8 @@ import { openDatabase, withTransaction } from './db';
 import { estimateTokens, persistMessage, persistMessageParts } from './ingest';
 import { buildPressureReading, computePressureSignals } from './pressure';
 import { runNoiseSweep, runToolDecay } from './proactive-pass';
-import { extractFilePath, processFileRead } from './resource-versions';
+import { extractFilePath, processFileRead } from './resource-versions.js';
+import { associateResourceWithSlots } from './slot-associations.js';
 import { DECAY_WINDOWS, detectCallType, detectConsumption, insertToolCallMeta } from './tool-tracker';
 import { extractStateFromMessage } from './state-extraction';
 import { getStateSlot, kernelSlotsPresent, upsertStateSlot } from './state-slots';
@@ -307,6 +308,8 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
                     `[${ENGINE_ID}] File read version tracked: message=${messageId} uri=${resourceVersion.resourceUri} delta=${resourceVersion.delta} ratio=${resourceVersion.deltaRatio.toFixed(4)} turn=${resourceVersion.turn}`,
                   );
                 }
+
+                associateResourceWithSlots(db, params.sessionId, resourceVersion.id, index);
               }
             }
 

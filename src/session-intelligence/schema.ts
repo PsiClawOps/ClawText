@@ -9,7 +9,7 @@
 
 import type { DatabaseSync } from 'node:sqlite';
 
-const LATEST_SCHEMA_VERSION = 11;
+const LATEST_SCHEMA_VERSION = 12;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -373,6 +373,28 @@ export function migrate(db: DatabaseSync): void {
     db
       .prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)')
       .run(11, nowIso());
+    version = 11;
+  }
+
+  if (version < 12) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS resource_slot_associations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        resource_version_id INTEGER NOT NULL,
+        conversation_id TEXT NOT NULL,
+        slot_id TEXT NOT NULL,
+        slot_type TEXT NOT NULL,
+        slot_value_snapshot TEXT,
+        recovery_priority TEXT NOT NULL DEFAULT 'normal',
+        turn INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_rsa_resource ON resource_slot_associations(resource_version_id)`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_rsa_conv_slot ON resource_slot_associations(conversation_id, slot_id)`);
+    db
+      .prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)')
+      .run(12, nowIso());
   }
 }
 
