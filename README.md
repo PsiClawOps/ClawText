@@ -4,7 +4,7 @@
 
 ClawText is a standalone context management system — it protects memory, decisions, and high-value content from naive compression regardless of how you define your agents. Any OpenClaw agent benefits from smarter context management.
 
-But context protection is only half the problem. The other half is defining what's worth protecting in the first place. The [Agentic Cognitive Architecture](https://github.com/psiclawops/aca-internal) provides the structured identity layer: six files that define who an agent is, what it does, and what it refuses to do. Together, they form a stack — the architecture defines the agent, and ClawText keeps it intact. Each works independently. Both together is an architectural approach to agent quality, not a one-off improvement.
+But context protection is only half the problem. The other half is defining what's worth protecting in the first place. The [Agentic Cognitive Architecture](https://github.com/PsiClawOps/AgenticCognitiveArchitecture) provides the structured identity layer: six files that define who an agent is, what it does, and what it refuses to do. Together, they form a stack — the architecture defines the agent, and ClawText keeps it intact. Each works independently. Both together is an architectural approach to agent quality, not a one-off improvement.
 
 ---
 
@@ -28,7 +28,7 @@ It captures what matters from active work, retrieves it automatically when relev
 
 When context pressure forces compression, ClawText doesn't treat all content as equal. It knows what's expendable and what isn't. Conversation history gets summarized. Decisions, earned context, and high-value memory are protected. The agent keeps what matters and loses what doesn't.
 
-This extends to agent identity. ClawText integrates with the [Agentic Cognitive Architecture](https://github.com/psiclawops/aca-internal) to protect identity-critical content from compression — but identity protection is one capability of a broader context protection system. For the full identity architecture, see the [Agentic Cognitive Architecture specification](https://github.com/psiclawops/aca-internal).
+This extends to agent identity. ClawText integrates with the [Agentic Cognitive Architecture](https://github.com/PsiClawOps/AgenticCognitiveArchitecture) to protect identity-critical content from compression — but identity protection is one capability of a broader context protection system. For the full identity architecture, see the [Agentic Cognitive Architecture specification](https://github.com/PsiClawOps/AgenticCognitiveArchitecture).
 
 ---
 
@@ -203,15 +203,15 @@ The slot compositor classifies every piece of context and makes content-aware co
 
 | Tier | Compression behavior | Examples |
 |---|---|---|
-| **Protected** | Never compressed. Literal content only. | Identity files (via [Agentic Cognitive Architecture](https://github.com/psiclawops/aca-internal)), pinned decisions, active task definitions |
+| **Protected** | Never compressed. Literal content only. | Identity files (via [Agentic Cognitive Architecture](https://github.com/PsiClawOps/AgenticCognitiveArchitecture)), pinned decisions, active task definitions |
 | **Managed** | Shed under extreme pressure only. | Duty definitions, organizational context, high-value retrieved memory |
 | **Conversational** | Compressed proactively as pressure builds. | Chat history, tool outputs, intermediate work |
 
 **Proactive compression** means ClawText doesn't wait for the provider to truncate. It monitors context pressure continuously and compacts lower-tier content *before* the ceiling is reached — on its own terms, preserving DAG lineage of summarized content so nothing is truly lost.
 
-This tiered approach extends naturally to agent identity. When integrated with the [Agentic Cognitive Architecture](https://github.com/psiclawops/aca-internal), ClawText treats identity-defining files as protected-tier content that survives all compression. The result: an agent that has been running for hours, through multiple compaction cycles, still maintains consistent behavior, constraints, and voice.
+This tiered approach extends naturally to agent identity. When integrated with the [Agentic Cognitive Architecture](https://github.com/PsiClawOps/AgenticCognitiveArchitecture), ClawText treats identity-defining files as protected-tier content that survives all compression. The result: an agent that has been running for hours, through multiple compaction cycles, still maintains consistent behavior, constraints, and voice.
 
-> For the full identity architecture — how to define agent cognition in structured files, why the separation matters, and how drift corridors work — see the [Agentic Cognitive Architecture specification](https://github.com/psiclawops/aca-internal).
+> For the full identity architecture — how to define agent cognition in structured files, why the separation matters, and how drift corridors work — see the [Agentic Cognitive Architecture specification](https://github.com/PsiClawOps/AgenticCognitiveArchitecture).
 
 ### Reflect *(v0.4.0)*
 **memories → LLM synthesis → compressed context**
