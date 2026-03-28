@@ -575,9 +575,55 @@ function isSessionIntelligenceEnabled(config: unknown): boolean {
 }
 
 function resolveSessionIntelligenceConfig(config: unknown): SessionIntelligenceConfig {
+  const summarizationApi: NonNullable<SessionIntelligenceConfig['summarizationApi']> = {
+    async complete(_model: string, prompt: string): Promise<string> {
+      const envApiKey = process.env.OPENROUTER_API_KEY;
+      let configApiKey: string | undefined;
+
+      try {
+        const configFile = path.join(os.homedir(), '.openclaw', 'openclaw.json');
+        if (fs.existsSync(configFile)) {
+          const raw = fs.readFileSync(configFile, 'utf-8');
+          const cfg = JSON.parse(raw);
+          const key = cfg?.env?.vars?.OPENROUTER_API_KEY;
+          if (typeof key === 'string' && key.length > 0 && !key.startsWith('${')) {
+            configApiKey = key;
+          }
+        }
+      } catch {
+        // ignore, fall through to env fallback
+      }
+
+      const apiKey = envApiKey ?? configApiKey ?? process.env.OPENROUTER_MANAGEMENT_KEY;
+      if (!apiKey) throw new Error('[SI] No OPENROUTER_API_KEY for summarization');
+
+      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'openai/gpt-5.4-mini',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 2048,
+          temperature: 0.3,
+        }),
+      });
+
+      if (!response.ok) throw new Error(`[SI] Summarization error: ${response.status}`);
+
+      const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+      const content = data.choices?.[0]?.message?.content;
+      if (typeof content !== 'string' || !content.trim()) throw new Error('[SI] Empty summarization response');
+      return content.trim();
+    },
+  };
+
   const base: SessionIntelligenceConfig = {
     workspacePath: DEFAULT_WORKSPACE,
     defaultTokenBudget: 128_000,
+    summarizationApi,
     compactor: {
       summarizationModel: 'anthropic/claude-haiku-4-5',
       maxSummarizationsPerHour: 10,
@@ -622,6 +668,7 @@ function resolveSessionIntelligenceConfig(config: unknown): SessionIntelligenceC
     defaultTokenBudget: typeof si.defaultTokenBudget === 'number' && Number.isFinite(si.defaultTokenBudget) && si.defaultTokenBudget > 0
       ? si.defaultTokenBudget
       : base.defaultTokenBudget,
+    summarizationApi,
     compactor: {
       summarizationModel: typeof configuredCompactor?.summarizationModel === 'string' && configuredCompactor.summarizationModel.trim().length > 0
         ? configuredCompactor.summarizationModel
