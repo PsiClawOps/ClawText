@@ -45,14 +45,34 @@ function extractSoulAnchors(soulPath: string): string {
   }
 }
 
-function extractRoleGuidance(identity: AgentIdentity): string {
+function extractRoleGuidance(identity: AgentIdentity, workspacePath: string): string {
   const id = identity.agentId.toLowerCase();
 
+  // Special cases for known adversarial/security-specific agents
   if (id.includes('gore') || id.includes('antagonist'))
     return 'Adversarial review. Challenge assumptions. Name risks explicitly. Never agree without substance.';
   if (id.includes('sentinel') || id.includes('security'))
     return 'Security review. Identify vulnerabilities. Surface threat models. Never assume systems are safe.';
 
+  // Try to extract directive from SOUL.md "The Anchor" section
+  const soulPath = join(workspacePath, 'SOUL.md');
+  if (existsSync(soulPath)) {
+    try {
+      const lines = readFileSync(soulPath, 'utf-8').split('\n');
+      let inAnchor = false;
+      for (const line of lines) {
+        if (line.match(/^#{1,3}\s*The Anchor/i)) { inAnchor = true; continue; }
+        if (inAnchor && line.match(/^#{1,3}\s/)) break;
+        if (inAnchor && line.trim()) {
+          // First non-blank line after "The Anchor" heading — use as directive
+          const stripped = line.replace(/^>\s*/, '').replace(/\*\*/g, '').trim();
+          if (stripped.length > 10) return stripped.slice(0, 120);
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  // Final fallback by role
   const byRole: Record<string, string> = {
     council: 'Strategic oversight. Maintain independent perspective. Challenge assumptions before conclusions.',
     director: 'Domain ownership. Operational excellence. Coordinate with other directors for integration.',
@@ -76,7 +96,7 @@ export function extractIdentityAnchorContent(workspacePath: string): string | nu
 
   const identity = resolveAgentIdentity(workspacePath, config);
   const soulAnchors = extractSoulAnchors(join(workspacePath, 'SOUL.md'));
-  const roleGuidance = extractRoleGuidance(identity);
+  const roleGuidance = extractRoleGuidance(identity, workspacePath);
 
   const parts = [
     `## Identity Anchor`,

@@ -31,12 +31,36 @@ const DEFAULT_MULTI_AGENT_CONFIG: ClawTextMultiAgentConfig = {
 };
 
 /**
+ * Resolve agent role from IDENTITY.md in the workspace.
+ * Reads the **Role:** line and maps it to council/director/worker.
+ * Falls back to path-based heuristic if IDENTITY.md is absent.
+ */
+function resolveRoleFromIdentityFile(workspacePath: string): 'council' | 'director' | 'worker' | null {
+  const identityPath = join(workspacePath, 'IDENTITY.md');
+  if (!existsSync(identityPath)) return null;
+  try {
+    const lines = readFileSync(identityPath, 'utf-8').split('\n');
+    for (const line of lines) {
+      const match = line.match(/^\s*-\s*\*\*Role:\*\*\s*(.+)/i);
+      if (match) {
+        const roleText = match[1].toLowerCase();
+        if (roleText.includes('council')) return 'council';
+        if (roleText.includes('director')) return 'director';
+        return 'worker';
+      }
+    }
+  } catch { /* fall through */ }
+  return null;
+}
+
+/**
  * Resolve agent identity from workspace path or config.
  * 
  * Priority:
  * 1. Explicit config (clawtext.multiAgent.agentIdentity)
- * 2. Workspace path derivation (workspace-council/{agent} → council role)
- * 3. Fallback to 'default'
+ * 2. IDENTITY.md in workspace (reads Name + Role)
+ * 3. Workspace path derivation (workspace-council/{agent} → council role)
+ * 4. Fallback to 'default'
  */
 export function resolveAgentIdentity(workspacePath: string, config?: ClawTextMultiAgentConfig): AgentIdentity {
   // Priority 1: Explicit config
@@ -52,16 +76,18 @@ export function resolveAgentIdentity(workspacePath: string, config?: ClawTextMul
   const councilIndex = pathParts.indexOf('workspace-council');
   
   if (councilIndex !== -1 && councilIndex < pathParts.length - 1) {
-    const agentDir = pathParts[councilIndex + 1]; // e.g., "gore-antagonist"
+    const agentDir = pathParts[councilIndex + 1]; // e.g., "forge", "pylon", "chisel"
+    // Read actual role from IDENTITY.md — don't assume council just because of parent dir
+    const role = resolveRoleFromIdentityFile(workspacePath) ?? 'council';
     return {
       agentId: agentDir,
-      agentRole: 'council',
+      agentRole: role,
       agentName: agentDir,
       workspacePath,
     };
   }
 
-  // Also check for workspace-director pattern (future Directors tier)
+  // Also check for workspace-director pattern
   const directorIndex = pathParts.indexOf('workspace-director');
   if (directorIndex !== -1 && directorIndex < pathParts.length - 1) {
     const agentDir = pathParts[directorIndex + 1];
