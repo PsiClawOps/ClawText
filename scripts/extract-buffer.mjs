@@ -11,23 +11,48 @@ const STATE_FILE = path.join(INGEST_STATE_DIR, 'extract-state.json');
 const MIN_BATCH_SIZE = 1;
 const MAX_RECORDS = 2000;
 const MIN_AGE_HOURS = 24;
+const BAD_LINES_FILE = path.join(INGEST_STATE_DIR, 'extract-buffer.bad.jsonl');
 
 function safeReadJSONL(file) {
-  if (!fs.existsSync(file)) return [];
+  if (!fs.existsSync(file)) {
+    return { records: [], malformedLines: 0, partialLines: 0, badLines: [] };
+  }
 
-  const raw = fs.readFileSync(file, 'utf8').split('\n').map((line) => line.trim()).filter(Boolean);
+  const rawText = fs.readFileSync(file, 'utf8');
+  if (!rawText) {
+    return { records: [], malformedLines: 0, partialLines: 0, badLines: [] };
+  }
+
+  const hasTrailingNewline = rawText.endsWith('\n');
+  const lines = rawText.split('\n');
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+
+  // If writer is mid-append during read, the trailing line may be partial JSON.
+  // Drop it quietly; a later run will ingest once newline-terminated.
+  let partialLines = 0;
+  if (!hasTrailingNewline && lines.length > 0) {
+    lines.pop();
+    partialLines = 1;
+  }
+
   const parsed = [];
+  let malformedLines = 0;
+  const badLines = [];
 
-  for (const line of raw) {
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
     try {
-      const item = JSON.parse(line);
+      const item = JSON.parse(trimmed);
       if (item && typeof item === 'object') parsed.push(item);
     } catch (err) {
+      malformedLines += 1;
+      badLines.push(trimmed.slice(0, 2000));
       console.warn('[extract-buffer] skipping malformed buffer line', err?.message || String(err));
     }
   }
 
-  return parsed;
+  return { records: parsed, malformedLines, partialLines, badLines };
 }
 
 function normalizeTs(value) {
@@ -104,7 +129,7 @@ function safeAppendToMemory(today, payload) {
 
   if (payload.unparsedLines > 0) {
     lines.push('');
-    lines.push(`- ⚠️ Buffer contained ${payload.unparsedLines} malformed line(s).`);
+    lines.push(`- ⚠️ Buffer contained ${payload.unparsedLines} genuinely malformed line(s) (JSON parse failures — check extract-buffer.bad.jsonl).`);
   }
 
   fs.appendFileSync(memFile, `${lines.join('\n')}\n`);
@@ -134,8 +159,14 @@ function main() {
     return;
   }
 
-  const records = safeReadJSONL(BUFFER_FILE);
+  const { records, malformedLines, partialLines, badLines } = safeReadJSONL(BUFFER_FILE);
   const state = readState();
+
+  if (badLines.length > 0) {
+    const ts = new Date().toISOString();
+    const payload = badLines.map((line) => JSON.stringify({ ts, line }) + '\n').join('');
+    fs.appendFileSync(BAD_LINES_FILE, payload, 'utf8');
+  }
 
   const nowMs = Date.now();
   const candidates = records
@@ -169,7 +200,12 @@ function main() {
     to: new Date(candidates[candidates.length - 1].__ts || nowMs),
     sourceThreadCount: candidates.length,
     records: candidates,
-    unparsedLines: Math.max(0, records.length - candidates.length),
+    // Only count genuine JSON parse failures as "malformed" — partial lines
+    // are a normal race condition between the async hook writer and the cron
+    // reader, and are already silently dropped. Including them in this count
+    // was causing misleading "Buffer contained NNN malformed line(s)" warnings
+    // on every single extraction run.
+    unparsedLines: malformedLines,
   });
 
   const maxTs = Math.max(...candidates.map((r) => r.__ts));

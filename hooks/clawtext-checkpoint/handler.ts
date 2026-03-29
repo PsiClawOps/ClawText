@@ -1,8 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { bindSessionToTopic, sanitizeTopicName } from '../../src/session-topic-map.ts';
-import { syncTopicAnchor } from '../../src/topic-anchor.ts';
+import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+// Resolve dist relative to this file's actual location at runtime
+const _distDir = '/home/lumadmin/.openclaw/workspace/repo/clawtext/dist';
+const { bindSessionToTopic, sanitizeTopicName } = await import(path.join(_distDir, 'session-topic-map.js'));
+const { syncTopicAnchor } = await import(path.join(_distDir, 'topic-anchor.js'));
 
 const WORKSPACE = path.join(os.homedir(), '.openclaw/workspace');
 const JOURNAL_DIR = path.join(WORKSPACE, 'journal');

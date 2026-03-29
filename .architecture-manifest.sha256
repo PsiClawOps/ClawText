@@ -1,0 +1,10 @@
+# architecture-watchdog manifest — 2026-03-24T09:01:21Z
+# Review changes before running 'stamp' to accept them.
+#
+24ca00c7ff1979eb157a719dca6a9641c7a0abe93df965109fc158aa9ed2900f  hooks/clawtext-optimize/handler.ts
+6b2ec6f2f73323bb0d8a04b873c4a4c77614105b61d1f93059b67c91956311a1  hooks/clawtext-optimize/handler.js
+0dd227a6ef2bc76390892c7c078dd3ecd590b00b9e1e97c7112e70682e6fbef5  src/agent-identity.ts
+6375aeb1ea1b70b9b53ec8b5249c0704d7a5b19c720f68c6803f0883d42765ce  src/slots/identity-anchor-provider.ts
+d11bfc16fc6a25b4b934e7e0058b347f6a1f8acb82a774f597c7b8528caa49a0  src/clawptimization.ts
+53e90ec75118fb1237a2622b33c68cec3bb5149a077aa9e949de9c0add4c0cd6  src/prompt-compositor.ts
+d69f46f3e45816e49ee7e08ef4e78e50d6720abdd2702f306324787494cc31aa  src/injected-context.ts

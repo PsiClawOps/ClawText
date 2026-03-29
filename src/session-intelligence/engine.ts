@@ -43,6 +43,7 @@ import type { SessionIntelligenceConfig } from './types';
 
 const ENGINE_ID = 'clawtext-session-intelligence';
 const DEFAULT_TOKEN_BUDGET = 128_000;
+const MAX_SAFE_TOKEN_BUDGET = 120_000;
 const EMERGENCY_FILL_RATIO = 0.85;
 
 type ConversationLookup = {
@@ -73,13 +74,16 @@ type StoredMessage = {
 
 function resolveTokenBudget(tokenBudget?: number): number {
   if (typeof tokenBudget === 'number' && Number.isFinite(tokenBudget) && tokenBudget > 0) {
-    return Math.floor(tokenBudget);
+    const normalized = Math.floor(tokenBudget);
+    // Defensive cap: some providers reject above ~128k even when upstream reports larger windows.
+    // Keep a safety buffer to avoid retry loops from hard context overflows.
+    return Math.min(normalized, MAX_SAFE_TOKEN_BUDGET);
   }
 
   console.warn(
     `[${ENGINE_ID}] tokenBudget undefined; defaulting to ${DEFAULT_TOKEN_BUDGET}.`,
   );
-  return DEFAULT_TOKEN_BUDGET;
+  return Math.min(DEFAULT_TOKEN_BUDGET, MAX_SAFE_TOKEN_BUDGET);
 }
 
 function messageToText(message: unknown): string {
@@ -256,14 +260,21 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
         const index = nextMessageIndex(conversationId);
         const classifiedContentType = classifyMessage(params.message);
         const contentType: ContentType = params.isHeartbeat === true ? 'noise' : classifiedContentType;
-        const messageId = persistMessage(
-          db,
-          conversationId,
-          params.message,
-          index,
-          params.isHeartbeat === true,
-          contentType,
-        );
+        let messageId: number;
+        try {
+          messageId = persistMessage(
+            db,
+            conversationId,
+            params.message,
+            index,
+            params.isHeartbeat === true,
+            contentType,
+          );
+        } catch (skipErr) {
+          // Error-stub message (stopReason=error, empty content) — skip silently.
+          console.log(`[${ENGINE_ID}] Skipped error-stub message: ${skipErr instanceof Error ? skipErr.message : String(skipErr)}`);
+          return;
+        }
         persistMessageParts(db, messageId, params.message);
         extractStateFromMessage({
           db,
@@ -409,14 +420,23 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
         for (const message of params.messages) {
           const classifiedContentType = classifyMessage(message);
           const contentType: ContentType = params.isHeartbeat === true ? 'noise' : classifiedContentType;
-          const messageId = persistMessage(
-            db,
-            conversationId,
-            message,
-            index,
-            params.isHeartbeat === true,
-            contentType,
-          );
+          let messageId: number;
+          try {
+            messageId = persistMessage(
+              db,
+              conversationId,
+              message,
+              index,
+              params.isHeartbeat === true,
+              contentType,
+            );
+          } catch (skipErr) {
+            // persistMessage throws for error-stub messages (stopReason=error, empty content).
+            // Skip the message but keep incrementing index so ordering stays consistent.
+            console.log(`[${ENGINE_ID}] Skipped error-stub message at index ${index}: ${skipErr instanceof Error ? skipErr.message : String(skipErr)}`);
+            index += 1;
+            continue;
+          }
           persistMessageParts(db, messageId, message);
           extractStateFromMessage({
             db,
@@ -633,7 +653,8 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
         : null;
 
       if (effectiveSessionFile === null) {
-        console.log(`[${ENGINE_ID}] compact() running without session file for session ${params.sessionId}`);
+        // Expected for internal auto-compaction paths that do not carry sessionFile.
+        // Keep this debug-only to avoid noisy false alarms in production logs.
       }
 
       if (!kernelSlotsPresent(db, conversationId)) {
@@ -715,9 +736,26 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
     legacyCompactionParams?: Record<string, unknown>;
   }): Promise<void> {
     try {
+      // Ingest new messages from this turn into the SI database.
+      // The gateway calls afterTurn OR ingestBatch — not both. Since we implement
+      // afterTurn, the gateway skips ingestBatch entirely. We must ingest here.
+      const allMessages = Array.isArray(params.messages) ? params.messages : [];
+      const newMessages = typeof params.prePromptMessageCount === 'number' && params.prePromptMessageCount >= 0
+        ? allMessages.slice(params.prePromptMessageCount)
+        : allMessages;
+
+      if (newMessages.length > 0) {
+        await ingestBatch({
+          sessionId: params.sessionId,
+          messages: newMessages,
+          isHeartbeat: params.isHeartbeat,
+        });
+      }
+
+      // Pressure monitoring — warn if approaching emergency threshold.
       const budget = resolveTokenBudget(params.tokenBudget ?? config.defaultTokenBudget);
       const breaker = Math.floor(budget * EMERGENCY_FILL_RATIO);
-      const tokens = estimateCurrentPressure(Array.isArray(params.messages) ? params.messages : []);
+      const tokens = estimateCurrentPressure(allMessages);
       if (tokens >= breaker) {
         console.warn(
           `[${ENGINE_ID}] afterTurn pressure warning: ${tokens}/${budget} (${Math.round((tokens / budget) * 100)}%).`,

@@ -30,7 +30,15 @@ const handler = async (event) => {
       ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))
       : { lastExtractedTs: 0, totalExtracted: 0 };
 
-    const lines = fs.readFileSync(BUFFER_FILE, 'utf8').trim().split('\n').filter(Boolean);
+    const raw = fs.readFileSync(BUFFER_FILE, 'utf8');
+    const hasTrailingNewline = raw.endsWith('\n');
+    const lines = raw.split('\n');
+    if (lines.length && lines[lines.length - 1] === '') lines.pop();
+    if (!hasTrailingNewline && lines.length > 0) {
+      // Writer may be mid-append; ignore trailing partial JSON line.
+      lines.pop();
+    }
+
     const records = lines
       .map(l => { try { return JSON.parse(l); } catch { return null; } })
       .filter(r => r && r.ts > state.lastExtractedTs);

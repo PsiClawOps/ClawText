@@ -233,7 +233,7 @@ function runDeterministicTruncation(
 
   const candidates = db
     .prepare(
-      `SELECT id, content, token_count
+      `SELECT id, content, token_count, content_type, tool_call_id, tool_use_id
          FROM messages
         WHERE conversation_id = ?
           AND is_heartbeat = 0
@@ -241,29 +241,78 @@ function runDeterministicTruncation(
           AND content_type NOT IN ('decision', 'anchor')
         ORDER BY message_index ASC`,
     )
-    .all(conversationId) as Array<{ id: number; content: string; token_count: number | null }>;
+    .all(conversationId) as Array<{
+      id: number;
+      content: string;
+      token_count: number | null;
+      content_type: string | null;
+      tool_call_id: string | null;
+      tool_use_id: string | null;
+    }>;
 
-  const toDelete: number[] = [];
+  // Build a map of tool_use_id -> message id and tool_call_id -> message id
+  // so we can always prune tool_call + tool_result pairs atomically.
+  const toolUseById = new Map<string, number>();
+  const toolResultByCallId = new Map<string, number>();
+
+  for (const row of candidates) {
+    if (row.tool_use_id) toolUseById.set(row.tool_use_id, row.id);
+    if (row.tool_call_id) toolResultByCallId.set(row.tool_call_id, row.id);
+  }
+
+  const toDelete = new Set<number>();
   let reducedTokens = 0;
 
   for (const row of candidates) {
+    if (toDelete.has(row.id)) continue;
+
     const rowTokens = typeof row.token_count === 'number' && row.token_count > 0
       ? row.token_count
       : Math.ceil(row.content.length / 4);
 
-    toDelete.push(row.id);
+    toDelete.add(row.id);
     reducedTokens += rowTokens;
+
+    // If this is a tool_use message, also delete its paired tool_result
+    if (row.tool_use_id) {
+      const resultId = toolResultByCallId.get(row.tool_use_id);
+      if (resultId !== undefined && !toDelete.has(resultId)) {
+        const resultRow = candidates.find((c) => c.id === resultId);
+        const resultTokens = resultRow
+          ? (typeof resultRow.token_count === 'number' && resultRow.token_count > 0
+            ? resultRow.token_count
+            : Math.ceil(resultRow.content.length / 4))
+          : 0;
+        toDelete.add(resultId);
+        reducedTokens += resultTokens;
+      }
+    }
+
+    // If this is a tool_result message, also delete its paired tool_use
+    if (row.tool_call_id) {
+      const useId = toolUseById.get(row.tool_call_id);
+      if (useId !== undefined && !toDelete.has(useId)) {
+        const useRow = candidates.find((c) => c.id === useId);
+        const useTokens = useRow
+          ? (typeof useRow.token_count === 'number' && useRow.token_count > 0
+            ? useRow.token_count
+            : Math.ceil(useRow.content.length / 4))
+          : 0;
+        toDelete.add(useId);
+        reducedTokens += useTokens;
+      }
+    }
 
     if (reducedTokens >= targetReduction) {
       break;
     }
   }
 
-  const removedCount = removeMessageRows(db, toDelete);
+  const removedCount = removeMessageRows(db, [...toDelete]);
   const estimatedTokensAfter = estimateConversationTokens(db, conversationId);
 
   console.warn(
-    `[clawtext-session-intelligence] Deterministic truncation executed: removed ${removedCount} messages (tokens ${estimatedTokensBefore} -> ${estimatedTokensAfter}).`,
+    `[clawtext-session-intelligence] Deterministic truncation executed: removed ${removedCount} messages (tokens ${estimatedTokensBefore} -> ${estimatedTokensAfter}). Tool pairs pruned atomically.`,
   );
 
   return { removedCount, estimatedTokensAfter };
@@ -454,7 +503,9 @@ export async function runCompaction(
   }
 
   let truncationRemovedCount = 0;
-  if (capReachedAtLeaf || capReachedAtCondensation) {
+  const requiresHardTruncation = capReachedAtLeaf || capReachedAtCondensation || tokensAfter > tokenBudget;
+
+  if (requiresHardTruncation) {
     const truncationResult = runDeterministicTruncation(db, conversationId, tokenBudget, tokensAfter);
     truncationRemovedCount = truncationResult.removedCount;
     tokensAfter = truncationResult.estimatedTokensAfter;

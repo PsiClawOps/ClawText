@@ -132,6 +132,26 @@ export function estimateTokens(content: string): number {
   return Math.ceil(content.length / 4);
 }
 
+/**
+ * Returns true if the message is an error-state assistant message with no
+ * meaningful content (e.g. stopReason === "error" and content is empty).
+ * These occur when a provider fails to match a tool call and should not be
+ * ingested — they contain no useful signal and can pollute extraction.
+ */
+function isErrorStub(message: unknown): boolean {
+  if (!isRecord(message)) return false;
+  const role = message.role;
+  if (role !== 'assistant') return false;
+  const stopReason = message.stopReason ?? message.stop_reason;
+  if (stopReason !== 'error') return false;
+  const content = message.content;
+  // Empty array content with stopReason=error is the known error-stub pattern
+  if (Array.isArray(content) && content.length === 0) return true;
+  // Null/undefined content with stopReason=error is also an error stub
+  if (content == null) return true;
+  return false;
+}
+
 export function persistMessage(
   db: DatabaseSync,
   conversationId: number,
@@ -140,6 +160,9 @@ export function persistMessage(
   isHeartbeat: boolean,
   contentType: string = 'active',
 ): number {
+  if (isErrorStub(message)) {
+    throw new Error('[clawtext-session-intelligence] Skipping error-stub message (stopReason=error, empty content)');
+  }
   const role = resolveRole(message);
   const content = normalizeMessageContent(message);
   const tokenCount = estimateTokens(content);

@@ -53,6 +53,18 @@ interface LibraryIndexRecord {
   updatedAt?: string;
 }
 
+interface RagCacheEntry {
+  loadedAt: number;
+  clusters: Map<string, Cluster>;
+  libraryIndex: LibraryIndexRecord[];
+  documentFrequency: Map<string, number>;
+  totalDocuments: number;
+  avgDocLength: number;
+}
+
+const RAG_CACHE_TTL_MS = 60_000;
+const RAG_CACHE = new Map<string, RagCacheEntry>();
+
 /**
  * Clean a raw user query/prompt before using it for vector/BM25 search.
  *
@@ -149,8 +161,48 @@ export class ClawTextRAG {
       contextLibrarianAlwaysIncludeRecent: 1,
     };
 
+    if (this.restoreFromCache()) {
+      return;
+    }
+
     this.loadClusters();
     this.loadLibraryIndex();
+    this.saveToCache();
+  }
+
+  static invalidateCache(workspacePath?: string): void {
+    if (workspacePath) {
+      RAG_CACHE.delete(workspacePath);
+      return;
+    }
+    RAG_CACHE.clear();
+  }
+
+  private restoreFromCache(): boolean {
+    const cached = RAG_CACHE.get(this.workspacePath);
+    if (!cached) return false;
+    if (Date.now() - cached.loadedAt > RAG_CACHE_TTL_MS) {
+      RAG_CACHE.delete(this.workspacePath);
+      return false;
+    }
+
+    this.clusters = new Map(cached.clusters);
+    this.libraryIndex = [...cached.libraryIndex];
+    this.documentFrequency = new Map(cached.documentFrequency);
+    this.totalDocuments = cached.totalDocuments;
+    this.avgDocLength = cached.avgDocLength;
+    return true;
+  }
+
+  private saveToCache(): void {
+    RAG_CACHE.set(this.workspacePath, {
+      loadedAt: Date.now(),
+      clusters: new Map(this.clusters),
+      libraryIndex: [...this.libraryIndex],
+      documentFrequency: new Map(this.documentFrequency),
+      totalDocuments: this.totalDocuments,
+      avgDocLength: this.avgDocLength,
+    });
   }
 
   /**

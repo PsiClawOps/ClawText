@@ -8,11 +8,24 @@ import ClawTextRAG from './rag.js';
  *
  * Project keywords are auto-detected from cluster filenames — no hardcoding.
  */
+declare global {
+  // eslint-disable-next-line no-var
+  var __clawtextRagSingleton: ClawTextRAG | undefined;
+}
+
+function getSharedRag(): ClawTextRAG {
+  if (!globalThis.__clawtextRagSingleton) {
+    globalThis.__clawtextRagSingleton = new ClawTextRAG();
+  }
+  return globalThis.__clawtextRagSingleton;
+}
+
 export class ClawTextInjectionPlugin {
   private rag: ClawTextRAG;
 
   constructor() {
-    this.rag = new ClawTextRAG();
+    // Reuse one RAG instance per process to avoid repeated cluster reload churn.
+    this.rag = getSharedRag();
   }
 
   /**
@@ -100,7 +113,9 @@ export class ClawTextInjectionPlugin {
    * Reload clusters (for hot updates)
    */
   reload() {
-    this.rag = new ClawTextRAG();
+    ClawTextRAG.invalidateCache();
+    globalThis.__clawtextRagSingleton = new ClawTextRAG();
+    this.rag = globalThis.__clawtextRagSingleton;
     return this.getStats();
   }
 }

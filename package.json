@@ -52,7 +52,9 @@
     "test:content-types": "npm run build && node --test tests/content-type-classifier.test.mjs",
     "test:integrations": "npm run build && node --test tests/integrations.test.mjs",
     "test:session-intelligence": "npm run build && node --test tests/session-intelligence.test.mjs",
-    "test": "npm run test:content-types && npm run test:integrations && npm run test:session-intelligence"
+    "test": "npm run test:content-types && npm run test:integrations && npm run test:session-intelligence",
+    "deploy:hooks": "node scripts/deploy-hooks.mjs",
+    "deploy": "npm run build && npm run deploy:hooks"
   },
   "keywords": [
     "memory",
