@@ -70,6 +70,7 @@ type StoredMessage = {
   content: string;
   content_type: ContentType;
   token_count: number | null;
+  raw_message: string | null;
 };
 
 function resolveTokenBudget(tokenBudget?: number): number {
@@ -138,6 +139,17 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
   const compactorConfig = resolveCompactorConfig(config.compactor);
   const triggerConfig = resolveTriggerConfig(config.compactionTrigger);
   const summarizationTracker = new SummarizationTracker(compactorConfig.maxSummarizationsPerHour);
+  let _disposed = false;
+
+  /**
+   * Guard: throw a clear error if the engine has been disposed.
+   * Protects all public API entry points from using a closed DB handle.
+   */
+  function assertNotDisposed(caller: string): void {
+    if (_disposed) {
+      throw new Error(`[${ENGINE_ID}] ${caller}() called on disposed engine (DB closed). Workspace: ${workspacePath}`);
+    }
+  }
 
   function getOrCreateConversationId(sessionId: string): number {
     const cached = conversationIdBySession.get(sessionId);
@@ -207,6 +219,7 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
   }
 
   async function bootstrap(params: { sessionId: string; sessionFile: string }): Promise<BootstrapResult> {
+    assertNotDisposed('bootstrap');
     try {
       const conversationId = getOrCreateConversationId(params.sessionId);
 
@@ -248,6 +261,7 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
   }
 
   async function ingest(params: { sessionId: string; message: unknown; isHeartbeat?: boolean }): Promise<IngestResult> {
+    assertNotDisposed('ingest');
     try {
       const conversationId = getOrCreateConversationId(params.sessionId);
 
@@ -406,6 +420,7 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
     messages: unknown[];
     isHeartbeat?: boolean;
   }): Promise<IngestBatchResult> {
+    assertNotDisposed('ingestBatch');
     try {
       if (!Array.isArray(params.messages) || params.messages.length === 0) {
         return { ingestedCount: 0 };
@@ -463,6 +478,7 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
     messages: unknown[];
     tokenBudget?: number;
   }): Promise<AssembleResult> {
+    assertNotDisposed('assemble');
     try {
       const budget = resolveTokenBudget(params.tokenBudget ?? config.defaultTokenBudget);
       const conversationId = getOrCreateConversationId(params.sessionId);
@@ -479,7 +495,7 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
 
       const rows = db
         .prepare(
-          `SELECT message_index, role, content, content_type, token_count
+          `SELECT message_index, role, content, content_type, token_count, raw_message
              FROM messages
             WHERE conversation_id = ?
             ORDER BY message_index ASC`,
@@ -490,6 +506,7 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
           content: string;
           content_type: string | null;
           token_count: number | null;
+          raw_message: string | null;
         }>;
 
       const storedMessages: StoredMessage[] = rows.map((row) => ({
@@ -498,6 +515,7 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
         content: row.content,
         content_type: (row.content_type as ContentType) ?? 'active',
         token_count: row.token_count,
+        raw_message: row.raw_message ?? null,
       }));
 
       const selectedByIndex = new Map<number, StoredMessage>();
@@ -555,11 +573,42 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
 
       const selected = [...selectedByIndex.values()].sort((a, b) => a.message_index - b.message_index);
 
-      const historyMessagesFromDb: unknown[] = selected.map((row) => ({
-        role: row.role,
-        // Preserve compact payload tokens (<<PAYLOAD_REF:...>>) verbatim so agents can call expand(refId) to recover full content.
-        content: row.content,
-      }));
+      const historyMessagesFromDb: unknown[] = selected.map((row) => {
+        // Prefer raw_message (full original JSON) for faithful reconstruction.
+        // This preserves critical fields like toolCallId/toolName on toolResult
+        // messages that the Anthropic API requires but are lost when content is
+        // flattened to a string.
+        if (row.raw_message) {
+          try {
+            return JSON.parse(row.raw_message) as unknown;
+          } catch {
+            // JSON parse failed — fall through to reconstructed form below
+          }
+        }
+
+        // Fallback for legacy rows without raw_message.
+        // The runtime transform pipeline calls array methods (.flatMap, .filter,
+        // .some, .map) on content for assistant messages, so wrap in block-array.
+        // toolResult messages without raw_message are excluded — they cannot be
+        // faithfully reconstructed (missing toolCallId/toolName) and would cause
+        // "tool_use_id: Field required" 400 errors from the Anthropic API.
+        if (row.role === 'toolResult') {
+          return null; // filtered out below
+        }
+
+        if (row.role === 'assistant') {
+          return {
+            role: row.role,
+            content: [{ type: 'text', text: row.content }],
+          };
+        }
+
+        // user / system — plain string content is safe
+        return {
+          role: row.role,
+          content: row.content,
+        };
+      }).filter((msg): msg is NonNullable<typeof msg> => msg !== null);
 
       const runtimeMessages = Array.isArray(params.messages) ? params.messages : [];
       const contentTypeByIndex = getMessageContentTypes(db, conversationId);
@@ -596,10 +645,16 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
       const emergencyThreshold = Math.floor(budget * EMERGENCY_FILL_RATIO);
       if (estimatedTokens >= emergencyThreshold) {
         console.warn(`[${ENGINE_ID}] Emergency circuit breaker: ${estimatedTokens} >= ${emergencyThreshold}`);
-        if (!compactionInProgress.has(params.sessionId)) {
+        if (!compactionInProgress.has(params.sessionId) && !_disposed) {
           void (async () => {
             compactionInProgress.add(params.sessionId);
             try {
+              // Re-check disposed state before running compact — the engine may have
+              // been disposed between assemble() returning and this async executing.
+              if (_disposed) {
+                console.warn(`[${ENGINE_ID}] Emergency compact aborted: engine disposed during async delay`);
+                return;
+              }
               await compact({ sessionId: params.sessionId, sessionFile: '', force: true, compactionTarget: 'budget' });
             } catch (err) {
               console.warn(`[${ENGINE_ID}] Emergency compact error: ${err instanceof Error ? err.message : String(err)}`);
@@ -642,6 +697,7 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
     customInstructions?: string;
     legacyParams?: Record<string, unknown>;
   }): Promise<CompactResult> {
+    assertNotDisposed('compact');
     let conversationId: number | null = null;
     const tokenBudget = resolveTokenBudget(params.tokenBudget ?? config.defaultTokenBudget);
 
@@ -735,6 +791,7 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
     tokenBudget?: number;
     legacyCompactionParams?: Record<string, unknown>;
   }): Promise<void> {
+    assertNotDisposed('afterTurn');
     try {
       // Ingest new messages from this turn into the SI database.
       // The gateway calls afterTurn OR ingestBatch — not both. Since we implement
@@ -783,11 +840,17 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
   }
 
   async function dispose(): Promise<void> {
+    if (_disposed) return;
+    _disposed = true;
     try {
       db.close();
     } catch (error) {
       console.warn(`[${ENGINE_ID}] dispose failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  function isDisposed(): boolean {
+    return _disposed;
   }
 
   return {
@@ -806,6 +869,7 @@ export function createSessionIntelligenceEngine(config: SessionIntelligenceConfi
     prepareSubagentSpawn,
     onSubagentEnded,
     dispose,
+    isDisposed,
     _recall: {
       search(
         sessionId: string,

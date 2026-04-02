@@ -167,11 +167,20 @@ export function persistMessage(
   const content = normalizeMessageContent(message);
   const tokenCount = estimateTokens(content);
 
+  // Preserve the full original message JSON so assemble() can reconstruct
+  // structured messages (e.g. toolResult with toolCallId/toolName) faithfully.
+  let rawMessage: string | null = null;
+  try {
+    rawMessage = JSON.stringify(message);
+  } catch {
+    // non-serializable message — raw_message stays null, assemble() falls back
+  }
+
   const result = db
     .prepare(
       `INSERT INTO messages
-        (conversation_id, role, content, content_type, token_count, message_index, is_heartbeat, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (conversation_id, role, content, content_type, token_count, message_index, is_heartbeat, created_at, raw_message)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       conversationId,
@@ -182,6 +191,7 @@ export function persistMessage(
       index,
       isHeartbeat ? 1 : 0,
       new Date().toISOString(),
+      rawMessage,
     );
 
   return extractStatementRowId(result);

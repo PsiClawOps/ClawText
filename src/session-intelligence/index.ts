@@ -10,8 +10,10 @@ import { createSessionIntelligenceEngine } from './engine';
 import type { SessionIntelligenceConfig } from './types';
 
 const ENGINE_ID = 'clawtext-session-intelligence';
+const ROUTER_KEY = `${ENGINE_ID}::router`;
 
-// Module-level registry so tool factories can access recall methods after engine creation
+// Module-level registry so tool factories and hooks can access recall methods after engine creation.
+// Registry keys are absolute workspace paths for concrete engines plus ROUTER_KEY for the workspace-aware router.
 type SIEngineWithRecall = ReturnType<typeof createSessionIntelligenceEngine>;
 const _siEngineRegistry = new Map<string, SIEngineWithRecall>();
 
@@ -19,24 +21,140 @@ type ContextEngineRegistrationApi = {
   registerContextEngine: (id: string, factory: () => unknown) => void;
 };
 
-export function getRegisteredSIEngine(): SIEngineWithRecall | undefined {
-  return _siEngineRegistry.get(ENGINE_ID);
+function normalizeWorkspacePath(workspacePath: string): string {
+  return path.resolve(workspacePath);
+}
+
+function resolveWorkspacePathForSession(config: SessionIntelligenceConfig, sessionId: string): string {
+  const resolved = typeof config.workspaceResolver === 'function'
+    ? config.workspaceResolver(sessionId)
+    : config.workspacePath;
+  return normalizeWorkspacePath(resolved || config.workspacePath);
+}
+
+function getOrCreateWorkspaceEngine(
+  config: SessionIntelligenceConfig,
+  workspacePath: string,
+): SIEngineWithRecall {
+  const normalizedWorkspacePath = normalizeWorkspacePath(workspacePath);
+  const existing = _siEngineRegistry.get(normalizedWorkspacePath);
+  // Evict disposed instances — dispose() closes the DB handle; reuse would fail
+  if (existing) {
+    if (typeof (existing as unknown as { isDisposed?: () => boolean }).isDisposed === 'function' &&
+        (existing as unknown as { isDisposed: () => boolean }).isDisposed()) {
+      _siEngineRegistry.delete(normalizedWorkspacePath);
+    } else {
+      return existing;
+    }
+  }
+
+  const libraryEntriesDir = path.join(
+    normalizedWorkspacePath,
+    'state',
+    'clawtext',
+    'prod',
+    'library',
+    'entries',
+  );
+
+  const engine = createSessionIntelligenceEngine({
+    ...config,
+    workspacePath: normalizedWorkspacePath,
+    libraryEntriesDir,
+  });
+  _siEngineRegistry.set(normalizedWorkspacePath, engine);
+  return engine;
+}
+
+export function getRegisteredSIEngine(workspacePath?: string): SIEngineWithRecall | undefined {
+  if (workspacePath && workspacePath.trim().length > 0) {
+    return _siEngineRegistry.get(normalizeWorkspacePath(workspacePath));
+  }
+
+  return _siEngineRegistry.get(ROUTER_KEY) ?? _siEngineRegistry.get(normalizeWorkspacePath(process.cwd()));
 }
 
 export function registerSessionIntelligenceEngine(
   api: ContextEngineRegistrationApi,
   config: SessionIntelligenceConfig,
 ): void {
-  const libraryEntriesDir = config.workspacePath
-    ? path.join(config.workspacePath, 'state', 'clawtext', 'prod', 'library', 'entries')
-    : undefined;
-
   api.registerContextEngine(
     ENGINE_ID,
     () => {
-      const engine = createSessionIntelligenceEngine({ ...config, libraryEntriesDir });
-      _siEngineRegistry.set(ENGINE_ID, engine);
-      return engine;
+      const router: SIEngineWithRecall = {
+        info: {
+          id: ENGINE_ID,
+          name: 'ClawText Session Intelligence',
+          version: '0.4.0-walk4',
+          ownsCompaction: true,
+        },
+        bootstrap: (params) => getOrCreateWorkspaceEngine(
+          config,
+          resolveWorkspacePathForSession(config, params.sessionId),
+        ).bootstrap(params),
+        ingest: (params) => getOrCreateWorkspaceEngine(
+          config,
+          resolveWorkspacePathForSession(config, params.sessionId),
+        ).ingest(params),
+        ingestBatch: (params) => getOrCreateWorkspaceEngine(
+          config,
+          resolveWorkspacePathForSession(config, params.sessionId),
+        ).ingestBatch(params),
+        assemble: (params) => getOrCreateWorkspaceEngine(
+          config,
+          resolveWorkspacePathForSession(config, params.sessionId),
+        ).assemble(params),
+        compact: (params) => getOrCreateWorkspaceEngine(
+          config,
+          resolveWorkspacePathForSession(config, params.sessionId),
+        ).compact(params),
+        afterTurn: (params) => getOrCreateWorkspaceEngine(
+          config,
+          resolveWorkspacePathForSession(config, params.sessionId),
+        ).afterTurn(params),
+        prepareSubagentSpawn: (params) => getOrCreateWorkspaceEngine(
+          config,
+          resolveWorkspacePathForSession(config, params.parentSessionKey),
+        ).prepareSubagentSpawn(params),
+        onSubagentEnded: (params) => getOrCreateWorkspaceEngine(
+          config,
+          resolveWorkspacePathForSession(config, params.childSessionKey),
+        ).onSubagentEnded(params),
+        dispose: async () => {
+          const entries = [..._siEngineRegistry.entries()]
+            .filter(([key]) => key !== ROUTER_KEY);
+          await Promise.all(entries.map(([, engine]) => engine.dispose()));
+          // Clear disposed workspace engines from the registry so subsequent
+          // getOrCreateWorkspaceEngine calls recreate fresh instances with open DBs.
+          for (const [key] of entries) {
+            _siEngineRegistry.delete(key);
+          }
+        },
+        _recall: {
+          search(sessionId, query, limit, types) {
+            return getOrCreateWorkspaceEngine(
+              config,
+              resolveWorkspacePathForSession(config, sessionId),
+            )._recall.search(sessionId, query, limit, types);
+          },
+          describe(sessionId, id) {
+            return getOrCreateWorkspaceEngine(
+              config,
+              resolveWorkspacePathForSession(config, sessionId),
+            )._recall.describe(sessionId, id);
+          },
+          expand(sessionId, targetId) {
+            return getOrCreateWorkspaceEngine(
+              config,
+              resolveWorkspacePathForSession(config, sessionId),
+            )._recall.expand(sessionId, targetId);
+          },
+        },
+      } as SIEngineWithRecall;
+
+      _siEngineRegistry.set(ROUTER_KEY, router);
+      getOrCreateWorkspaceEngine(config, config.workspacePath);
+      return router;
     },
   );
 }

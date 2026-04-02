@@ -724,17 +724,26 @@ export default {
       try {
         const workspaceResolver = (sessionId: string): string => {
           try {
+            // Primary path: runtime passes session keys like agent:<agentId>:...
+            if (typeof sessionId === 'string' && sessionId.startsWith('agent:')) {
+              const parts = sessionId.split(':');
+              if (parts[0] === 'agent' && parts[1]) {
+                const resolved = resolveWorkspaceForSession(sessionId, parts[1], api as any);
+                return resolved.workspacePath;
+              }
+            }
+
+            // Fallback: older/runtime-internal callers may pass the opaque session UUID.
             const stateFile = path.join(DEFAULT_WORKSPACE, 'state', 'clawtext', 'runtime', 'agent-session-state.json');
             if (fs.existsSync(stateFile)) {
               const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
               const sessions = state?.sessionsByKey ?? {};
               for (const [key, val] of Object.entries(sessions)) {
                 if ((val as any)?.sessionId === sessionId) {
-                  // Extract agentId from session key (format: agent:<agentId>:...)
                   const parts = key.split(':');
                   if (parts[0] === 'agent' && parts[1]) {
                     const agentId = parts[1];
-                    const resolved = resolveWorkspaceForSession(undefined, agentId, api as any);
+                    const resolved = resolveWorkspaceForSession(key, agentId, api as any);
                     return resolved.workspacePath;
                   }
                 }

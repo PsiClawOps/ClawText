@@ -11,6 +11,8 @@ export type AcaOverlayFiles = {
   job?: string;
   charter?: string;
   comms?: string;
+  motivations?: string;
+  workqueue?: string;
 };
 
 export type AcaLoadResult = {
@@ -103,6 +105,22 @@ export function loadAcaFiles(workspacePath: string): AcaLoadResult {
     overlay.comms = fs.readFileSync(commsResolvedPath, 'utf8');
   }
 
+  const motivationsPath = path.join(workspacePath, 'MOTIVATIONS.md');
+  const motivationsRaw = readOptionalFile(motivationsPath);
+  if (motivationsRaw === null) {
+    overlayMissing.push('MOTIVATIONS.md');
+  } else {
+    overlay.motivations = motivationsRaw;
+  }
+
+  const workqueuePath = path.join(workspacePath, 'WORKQUEUE.md');
+  const workqueueRaw = readOptionalFile(workqueuePath);
+  if (workqueueRaw === null) {
+    overlayMissing.push('WORKQUEUE.md');
+  } else {
+    overlay.workqueue = workqueueRaw;
+  }
+
   if (kernelMissing.length === 3) {
     console.error(`[${ENGINE_ID}] ACA kernel unavailable: SOUL.md, IDENTITY.md, and USER.md are all missing.`);
   }
@@ -149,6 +167,14 @@ export function buildOverlayContent(overlay: AcaOverlayFiles): string {
     sections.push(['### COMMS', overlay.comms].join('\n'));
   }
 
+  if (typeof overlay.motivations === 'string') {
+    sections.push(['### MOTIVATIONS', overlay.motivations].join('\n'));
+  }
+
+  if (typeof overlay.workqueue === 'string') {
+    sections.push(['### WORKQUEUE', overlay.workqueue].join('\n'));
+  }
+
   if (sections.length === 0) {
     return '';
   }
@@ -165,7 +191,9 @@ export function estimateAcaTokens(result: AcaLoadResult): { kernelTokens: number
   const overlayTokens =
     (typeof result.overlay.job === 'string' ? Math.ceil(result.overlay.job.length / 4) : 0)
     + (typeof result.overlay.charter === 'string' ? Math.ceil(result.overlay.charter.length / 4) : 0)
-    + (typeof result.overlay.comms === 'string' ? Math.ceil(result.overlay.comms.length / 4) : 0);
+    + (typeof result.overlay.comms === 'string' ? Math.ceil(result.overlay.comms.length / 4) : 0)
+    + (typeof result.overlay.motivations === 'string' ? Math.ceil(result.overlay.motivations.length / 4) : 0)
+    + (typeof result.overlay.workqueue === 'string' ? Math.ceil(result.overlay.workqueue.length / 4) : 0);
 
   return { kernelTokens, overlayTokens };
 }

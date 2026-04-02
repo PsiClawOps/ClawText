@@ -9,7 +9,7 @@
 
 import type { DatabaseSync } from 'node:sqlite';
 
-const LATEST_SCHEMA_VERSION = 12;
+const LATEST_SCHEMA_VERSION = 13;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -395,6 +395,24 @@ export function migrate(db: DatabaseSync): void {
     db
       .prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)')
       .run(12, nowIso());
+    version = 12;
+  }
+
+  if (version < 13) {
+    // Add raw_message column to preserve original message JSON for faithful
+    // reconstruction in assemble(). Without this, toolResult messages lose
+    // their toolCallId/toolName fields when content is flattened to a string,
+    // causing "tool_use_id: Field required" errors from the Anthropic API.
+    const messageColumns = db
+      .prepare('PRAGMA table_info(messages)')
+      .all() as Array<{ name: string }>;
+    const hasRawMessage = messageColumns.some((col) => col.name === 'raw_message');
+    if (!hasRawMessage) {
+      db.exec('ALTER TABLE messages ADD COLUMN raw_message TEXT');
+    }
+    db
+      .prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)')
+      .run(13, nowIso());
   }
 }
 
