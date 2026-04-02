@@ -4,6 +4,14 @@ All notable changes to ClawText are documented here.
 
 ---
 
+## [Unreleased]
+
+### Changed
+- Refreshed `README.md` to distinguish **live now**, **shadow-only**, **restart/cutover-gated**, and **not yet fully live** ClawText behavior.
+- Added `docs/SESSION_INTELLIGENCE_ROLLOUT_PREP.md` with the current-state delta, guarded Walk 1/2 rollout plan, canary recommendation, prerequisites, blockers, measurement plan, and explicit call that `legacy` remains the current gating limiter.
+
+---
+
 ## [0.4.0] — 2026-03-20
 
 ### Added

@@ -20,6 +20,81 @@ But context protection is only half the problem. The other half is defining what
 
 ---
 
+## Current operational status
+
+ClawText is real and useful today, but not every major subsystem is equally live.
+
+**Short version:**
+- **Live now:** journal-backed checkpoint/restore, compaction tail injection, emergency pre-compaction pruning, and the standard ClawText memory/retrieval lanes.
+- **Live but shadow-only:** Session Intelligence database warming via `clawtext-si-shadow`.
+- **Requires restart / explicit cutover:** Session Intelligence becoming the active production context engine.
+- **Not yet safe to describe as fully live:** proactive compaction reduction via Session Intelligence as the primary production behavior.
+
+### Live now
+
+#### Checkpoints and restore
+- `clawtext-checkpoint` writes structured session checkpoints to the journal on reset/new and every 25 messages.
+- `clawtext-restore` injects recent journal context on bootstrap when recovery conditions match.
+- This materially improves cold-start recovery after session interruption or loss.
+
+#### Compaction tail injection
+- When compaction happens, ClawText captures the last raw messages before compaction and writes a marker.
+- On next bootstrap, `clawtext-restore` injects:
+  - a compaction notice
+  - the last 5 raw messages before compaction
+- This is live and intended to reduce the “what did I just lose?” problem after compaction.
+
+#### Emergency compaction-support behavior
+- `clawtext-prune` runs before compaction and records rich checkpoint/telemetry data.
+- It helps reduce damage and improve observability.
+- It should not be described as a full compaction-prevention guarantee.
+
+### Live but not cut over
+
+#### Session Intelligence shadow feed
+- `clawtext-si-shadow` is deployed.
+- It passively feeds messages into the Session Intelligence SQLite path while the **legacy** context engine remains active.
+- This warms the DB and reduces cold-start risk for later cutover.
+- It does **not** mean Session Intelligence is currently assembling production prompts.
+
+### Requires restart or cutover
+
+#### Session Intelligence as the active context engine
+- The Session Intelligence engine exists and is registered as `clawtext-session-intelligence`.
+- Production still needs an explicit switch away from `plugins.slots.contextEngine: "legacy"` plus restart/cutover.
+- Until that happens, `legacy` remains the gating limiter on smarter prompt assembly and proactive compaction reduction.
+
+### Not yet fully live
+
+#### Proactive compaction reduction posture
+ClawText is moving toward proactive compaction reduction, but current reality matters:
+- some supporting pieces are already live
+- Session Intelligence logic exists
+- the main production cutover is still gated
+
+So the honest posture today is:
+- **continuity support is partially operational now**
+- **full proactive compaction reduction is not yet operationally complete**
+
+For the rollout plan and canary recommendation, see [`docs/SESSION_INTELLIGENCE_ROLLOUT_PREP.md`](docs/SESSION_INTELLIGENCE_ROLLOUT_PREP.md).
+
+### Canonical status breakdown
+
+| Area | Status | Notes |
+|---|---|---|
+| Working memory / retrieval lanes | **Live** | Core ClawText functionality |
+| Checkpoints | **Live** | Journal checkpoints every 25 messages and on reset/new |
+| Bootstrap restore | **Live** | Injects recent journal context when recovery conditions match |
+| Compaction tail injection | **Live** | Notice + last 5 raw messages on next bootstrap |
+| Active pruning hook | **Live** | Supportive / telemetry-heavy, not a full prevention guarantee |
+| Session Intelligence engine code | **Built** | Exists in repo and can be registered |
+| Session Intelligence shadow ingest | **Live (shadow)** | Warming SQLite DBs while legacy stays active |
+| Session Intelligence production assembly | **Restart-gated** | Needs cutover from `legacy` |
+| Proactive compaction reduction via SI | **Cutover-gated** | Not yet fully live as primary prod behavior |
+| Hardened corruption / resume contract | **Not yet complete** | Direction exists; production contract still needs hardening |
+
+---
+
 ## What ClawText does
 
 ClawText is a layered memory and context protection system for OpenClaw agents.
@@ -392,15 +467,23 @@ The identity protection and proactive context management in ClawText builds on s
 
 ## Documentation
 
+### Start here for current operational reality
+- [`docs/SESSION_INTELLIGENCE_ROLLOUT_PREP.md`](docs/SESSION_INTELLIGENCE_ROLLOUT_PREP.md) — current live vs restart-gated delta, blockers, canary recommendation, and guarded rollout plan
+- [`hooks/clawtext-checkpoint/HOOK.md`](hooks/clawtext-checkpoint/HOOK.md) — what the live checkpoint hook writes
+- [`hooks/clawtext-restore/HOOK.md`](hooks/clawtext-restore/HOOK.md) — what bootstrap restore injects today
+- [`hooks/clawtext-ingest/HOOK.md`](hooks/clawtext-ingest/HOOK.md) — compaction notice + raw tail behavior
+- [`hooks/clawtext-si-shadow/HOOK.md`](hooks/clawtext-si-shadow/HOOK.md) — shadow-fed Session Intelligence behavior while `legacy` remains active
+- [`hooks/clawtext-prune/HOOK.md`](hooks/clawtext-prune/HOOK.md) — active pruning / telemetry behavior before compaction
+
+### Core deep docs
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full system design and memory lane model
-- [`docs/NORTHSTAR.md`](docs/NORTHSTAR.md) — product definition, principles, and strategic locks
-- [`docs/MILESTONES.md`](docs/MILESTONES.md) — shipped value and evidence base
+- [`docs/CLAWPTIMIZATION-v2.md`](docs/CLAWPTIMIZATION-v2.md) — scored slot composition, pressure handling, pruning model
+- [`docs/RECENCY_CONTINUITY_SLOT_SPEC.md`](docs/RECENCY_CONTINUITY_SLOT_SPEC.md) — continuity/recency slot model and current open questions
 - [`docs/OPERATIONAL_LEARNING.md`](docs/OPERATIONAL_LEARNING.md) — operational learning lane implementation
 - [`docs/INGEST.md`](docs/INGEST.md) — ingest sources, CLI, and configuration
 - [`docs/HOT_CACHE.md`](docs/HOT_CACHE.md) — hot cache design and tuning
 - [`docs/MEMORY_POLICY_TRIGGER_CONTRACT.md`](docs/MEMORY_POLICY_TRIGGER_CONTRACT.md) — when ClawText captures, retrieves, promotes, or asks
-- [`docs/LIBRARY_LANE.md`](docs/LIBRARY_LANE.md) — post-2.0 design for curated project/library knowledge
-- [`docs/LIBRARY_PROXMOX_9_1_COLLECTION_PLAN.md`](docs/LIBRARY_PROXMOX_9_1_COLLECTION_PLAN.md) — first external library collection plan using official Proxmox VE 9.1 docs
+- [`docs/LIBRARY_LANE.md`](docs/LIBRARY_LANE.md) — curated project/library knowledge lane
 - [`docs/LIBRARY_LANE_INTEGRATION_SPEC.md`](docs/LIBRARY_LANE_INTEGRATION_SPEC.md) — technical integration plan for collections, overlays, indexing, and retrieval
 - [`docs/LIBRARY_AGENT_IMPORT_WORKFLOW.md`](docs/LIBRARY_AGENT_IMPORT_WORKFLOW.md) — agent-led workflow for turning natural-language library import requests into structured collection ingest
 - `npm run library:smoke` — quick validation that Library Lane outranks general memory for reference-style queries
